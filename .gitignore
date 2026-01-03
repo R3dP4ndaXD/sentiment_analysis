@@ -1,0 +1,56 @@
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyo
+
+# Distribution / packaging
+dist/
+build/
+*.egg-info/
+*.egg
+
+# Jupyter notebooks
+.ipynb_checkpoints/
+
+# IDE settings
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Data files (large, download separately)
+data/raw/
+*.csv
+*.tsv
+
+# Model checkpoints and embeddings (large files)
+checkpoints/
+*.pt
+*.pth
+*.bin
+fasttext/
+*.vec
+
+# Plots (regenerate from code)
+plots/
+visualizations/
+
+# Logs
+logs/
+*.log
+
+# Environment variables
+.env
+
+# spaCy models (download separately)
+ro_core_news_sm/
