@@ -492,10 +492,12 @@ def main():
     callbacks = []
     
     if args.early_stopping > 0:
+        # Use same metric as checkpointing for consistency
+        es_mode = "max" if "f1" in args.checkpoint_metric or "acc" in args.checkpoint_metric else "min"
         callbacks.append(EarlyStopping(
-            monitor="val_loss",
+            monitor=args.checkpoint_metric,
             patience=args.early_stopping,
-            mode="min",
+            mode=es_mode,
             verbose=True,
         ))
     
