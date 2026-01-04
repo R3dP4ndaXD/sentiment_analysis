@@ -232,10 +232,10 @@ class BiLSTMWithAttention(SentimentClassifier):
         
         # Create mask for padding
         mask = torch.arange(max_len, device=x.device).unsqueeze(0) < lengths.unsqueeze(1)
-        
+
         # Mask out padding positions with large negative value
         attention_scores = attention_scores.masked_fill(~mask, float('-inf'))
-        
+
         # Softmax to get attention weights
         attention_weights = torch.softmax(attention_scores, dim=1)  # (batch, seq_len)
         

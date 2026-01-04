@@ -95,8 +95,16 @@ class TextCsvDataset(Dataset):
         if len(tokens) > self.max_seq_len:
             tokens = tokens[:self.max_seq_len]
         
+        # Ensure at least one token (use UNK if empty)
+        if len(tokens) == 0:
+            tokens = ["<UNK>"]
+        
         # Encode to indices
         token_ids = self.vocab.encode(tokens)
+        
+        # Ensure at least length 1
+        if len(token_ids) == 0:
+            token_ids = [self.vocab.unk_idx]
         
         return EncodedSample(
             token_ids=token_ids,
