@@ -40,7 +40,8 @@ from src.data.vocab import Vocabulary, build_vocab_from_csv
 from src.data.dataloader import create_dataloaders, TextCsvDataset, collate_encoded
 from src.data.augmentations import (
     random_swap, random_delete, random_insert, random_shuffle_within_window,
-    TextAugmenter,
+    random_crop, synonym_replacement_fasttext, contextual_word_replacement, 
+    TextAugmenter, get_romanian_stopwords
 )
 from src.preprocessing.text import clean_text, tokenize
 from src.models import get_model, SimpleRNN, StackedRNN, LSTMClassifier, BiLSTMWithAttention, LSTMWithBatchNorm, StackedLSTM
@@ -101,10 +102,13 @@ def parse_args() -> argparse.Namespace:
     # Augmentation
     parser.add_argument(
         "--augment", type=str, default=None,
-        choices=["random_swap", "random_delete", "random_insert", "random_shuffle", "eda", "none"],
-        help="Data augmentation technique"
+        choices=[
+            "random_swap", "random_delete", "random_insert", "random_shuffle", "random_crop",
+            "synonym", "contextual", "eda", "eda_full", "none"
+        ],
+        help="Data augmentation technique (eda=swap+delete+insert+synonym, eda_full=all ops)"
     )
-    parser.add_argument("--aug_prob", type=float, default=0.1, help="Augmentation probability per word")
+    parser.add_argument("--aug_prob", type=float, default=0.1, help="Augmentation probability/intensity")
     
     # Embeddings
     parser.add_argument("--pretrained_embeddings", type=str, default=None, help="Path to pretrained fastText embeddings (.bin)")
@@ -136,19 +140,55 @@ def parse_args() -> argparse.Namespace:
 
 
 def get_augmentation_fn(aug_name: str, aug_prob: float):
-    """Get augmentation function by name."""
+    """Get augmentation function by name.
+    
+    Args:
+        aug_name: Name of the augmentation to use
+        aug_prob: Probability/intensity parameter:
+            - For random_delete: probability of deleting each token
+            - For random_swap/random_insert: converted to n_operations (1-5 based on prob)
+            - For random_shuffle: window_size derived from prob (2-5)
+            - For eda/composite: probability for each sub-operation
+    """
     if aug_name is None or aug_name == "none":
         return None
     
+    # Convert probability to discrete count for swap/insert (1-5 operations)
+    n_ops = max(1, int(aug_prob * 5)) if aug_prob else 1
+    # Convert probability to window size for shuffle (2-5)
+    window = max(2, min(5, int((1 - aug_prob) * 5) + 2)) if aug_prob else 3
+    
+    # Load Romanian stopwords for synonym/contextual augmentations
+    stopwords = None
+    if aug_name in ("synonym", "contextual", "eda"):
+        stopwords = get_romanian_stopwords()
+    
     aug_map = {
-        "random_swap": lambda tokens: random_swap(tokens, p=aug_prob),
+        "random_swap": lambda tokens: random_swap(tokens, n_swaps=n_ops),
         "random_delete": lambda tokens: random_delete(tokens, p=aug_prob),
-        "random_insert": lambda tokens: random_insert(tokens, p=aug_prob),
-        "random_shuffle": lambda tokens: random_shuffle_within_window(tokens, window_size=3),
+        "random_insert": lambda tokens: random_insert(tokens, n_inserts=n_ops),
+        "random_shuffle": lambda tokens: random_shuffle_within_window(tokens, window_size=window),
+        "random_crop": lambda tokens: random_crop(tokens, min_ratio=0.7, max_ratio=0.9),
+        "synonym": lambda tokens: synonym_replacement_fasttext(tokens, n_replacements=n_ops, stopwords=stopwords),
+        "contextual": lambda tokens: contextual_word_replacement(tokens, n_replacements=n_ops, stopwords=stopwords),
+        # Composite augmentations using TextAugmenter
         "eda": lambda tokens: TextAugmenter(
-            augmentations=["swap", "delete", "insert"],
+            strategies=["random_swap", "random_delete", "random_insert", "synonym"],
             p=aug_prob,
-        ).augment(tokens),
+            n_swaps=n_ops,
+            delete_p=aug_prob,
+            n_inserts=n_ops,
+            stopwords=stopwords,
+        )(tokens),
+        "eda_full": lambda tokens: TextAugmenter(
+            strategies=["random_swap", "random_delete", "random_insert", "random_shuffle", "random_crop", "synonym", "contextual"],
+            p=aug_prob,
+            n_swaps=n_ops,
+            delete_p=aug_prob,
+            n_inserts=n_ops,
+            window_size=window,
+            stopwords=stopwords,
+        )(tokens),
     }
     
     return aug_map.get(aug_name)
