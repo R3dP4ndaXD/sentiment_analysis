@@ -527,7 +527,7 @@ def main():
         device=device,
     )
     if aug_fn:
-        print(f"Augmentation: {args.augment} (p={args.aug_prob}, mode={args.aug_mode})")
+        print(f"Augmentation: {args.augment} (aug_prob={args.aug_prob}, mode={args.aug_mode})")
     
     # Create data loaders
     print("\nLoading data...")

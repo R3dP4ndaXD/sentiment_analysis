@@ -19,6 +19,13 @@ import nlpaug.augmenter.word as naw
 import nlpaug.augmenter.char as nac
 import nlpaug.flow as naf
 
+# Download required NLTK resources for nlpaug
+import nltk
+nltk.download('wordnet', quiet=True)
+nltk.download('omw-1.4', quiet=True)
+nltk.download('averaged_perceptron_tagger', quiet=True)
+nltk.download('averaged_perceptron_tagger_eng', quiet=True)
+
 # Cache for expensive models
 _FASTTEXT_MODEL_PATH = None
 _BERT_MODEL_NAME = "dumitrescustefan/bert-base-romanian-cased-v1"
