@@ -39,9 +39,12 @@ from src.config import Paths, DataConfig, ModelConfig, TrainConfig
 from src.data.vocab import Vocabulary, build_vocab_from_csv
 from src.data.dataloader import create_dataloaders, TextCsvDataset, collate_encoded
 from src.data.augmentations import (
-    random_swap, random_delete, random_insert, random_shuffle_within_window,
+    random_swap, random_delete, contextual_insert,
     random_crop, synonym_replacement_fasttext, contextual_word_replacement, 
-    TextAugmenter, get_romanian_stopwords
+    TextAugmenter, get_romanian_stopwords,
+    get_eda_augmenter, get_light_augmenter, get_semantic_augmenter, 
+    get_heavy_augmenter, get_noise_augmenter,
+    back_translate, keyboard_typo, ocr_error,
 )
 from src.preprocessing.text import clean_text, tokenize
 from src.models import get_model, SimpleRNN, StackedRNN, LSTMClassifier, BiLSTMWithAttention, LSTMWithBatchNorm, StackedLSTM
@@ -103,12 +106,21 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--augment", type=str, default=None,
         choices=[
-            "random_swap", "random_delete", "random_insert", "random_shuffle", "random_crop",
-            "synonym", "contextual", "eda", "eda_full", "none"
+            # Single augmentations
+            "random_swap", "random_delete", "random_crop", "insert"
+            "synonym", "contextual", "back_translate", "keyboard", "ocr",
+            # Composite augmentations (nlpaug flows)
+            "eda", "eda_translate", "eda_light", "eda_semantic", "eda_heavy", "eda_noise",
+            "none"
         ],
-        help="Data augmentation technique (eda=swap+delete+insert+synonym, eda_full=all ops)"
+        help="Data augmentation technique. Single ops or composites (eda_*)"
     )
     parser.add_argument("--aug_prob", type=float, default=0.1, help="Augmentation probability/intensity")
+    parser.add_argument(
+        "--aug_mode", type=str, default="sometimes",
+        choices=["sometimes", "sequential", "one_of"],
+        help="How to apply multiple augmentations (sometimes=probabilistic, sequential=all, one_of=pick one)"
+    )
     
     # Embeddings
     parser.add_argument("--pretrained_embeddings", type=str, default=None, help="Path to pretrained fastText embeddings (.bin)")
@@ -139,59 +151,117 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def get_augmentation_fn(aug_name: str, aug_prob: float):
-    """Get augmentation function by name.
+def get_augmentation_fn(aug_name: str, aug_prob: float, aug_mode: str = "sometimes", 
+                        fasttext_path: str = None, device: str = "cpu"):
+    """Get augmentation function by name using nlpaug.
     
     Args:
         aug_name: Name of the augmentation to use
-        aug_prob: Probability/intensity parameter:
-            - For random_delete: probability of deleting each token
-            - For random_swap/random_insert: converted to n_operations (1-5 based on prob)
-            - For random_shuffle: window_size derived from prob (2-5)
-            - For eda/composite: probability for each sub-operation
+        aug_prob: Probability/intensity parameter
+        aug_mode: How to chain augmentations ("sometimes", "sequential", "one_of")
+        fasttext_path: Path to fastText embeddings (for synonym augmentation)
+        device: Device for BERT models ("cpu" or "cuda")
+    
+    Returns:
+        Callable that takes tokens and returns augmented tokens
     """
     if aug_name is None or aug_name == "none":
         return None
     
     # Convert probability to discrete count for swap/insert (1-5 operations)
-    n_ops = max(1, int(aug_prob * 5)) if aug_prob else 1
-    # Convert probability to window size for shuffle (2-5)
-    window = max(2, min(5, int((1 - aug_prob) * 5) + 2)) if aug_prob else 3
+    n_ops = max(1, int(aug_prob * 10)) if aug_prob else 1
     
-    # Load Romanian stopwords for synonym/contextual augmentations
-    stopwords = None
-    if aug_name in ("synonym", "contextual", "eda"):
-        stopwords = get_romanian_stopwords()
+    # Load Romanian stopwords
+    stopwords = get_romanian_stopwords()
     
-    aug_map = {
+    # Single augmentation functions
+    single_augs = {
         "random_swap": lambda tokens: random_swap(tokens, n_swaps=n_ops),
         "random_delete": lambda tokens: random_delete(tokens, p=aug_prob),
-        "random_insert": lambda tokens: random_insert(tokens, n_inserts=n_ops),
-        "random_shuffle": lambda tokens: random_shuffle_within_window(tokens, window_size=window),
         "random_crop": lambda tokens: random_crop(tokens, min_ratio=0.7, max_ratio=0.9),
-        "synonym": lambda tokens: synonym_replacement_fasttext(tokens, n_replacements=n_ops, stopwords=stopwords),
-        "contextual": lambda tokens: contextual_word_replacement(tokens, n_replacements=n_ops, stopwords=stopwords),
-        # Composite augmentations using TextAugmenter
+        "inser": lambda tokens: contextual_insert(tokens, n_inserts=n_ops, device=device),
+        "synonym": lambda tokens: synonym_replacement_fasttext(
+            tokens, n_replacements=n_ops, model_path=fasttext_path, stopwords=stopwords
+        ),
+        "contextual": lambda tokens: contextual_word_replacement(
+            tokens, n_replacements=n_ops, stopwords=stopwords, device=device
+        ),
+        "back_translate": lambda tokens: back_translate(tokens, device=device),
+        "keyboard": lambda tokens: keyboard_typo(tokens, aug_p=aug_prob),
+        "ocr": lambda tokens: ocr_error(tokens, aug_p=aug_prob),
+    }
+    
+    if aug_name in single_augs:
+        return single_augs[aug_name]
+    
+    # Composite augmentations using TextAugmenter with nlpaug flows
+    composite_augs = {
+        # Standard EDA: swap, delete, synonym (probabilistic)
         "eda": lambda tokens: TextAugmenter(
-            strategies=["random_swap", "random_delete", "random_insert", "synonym"],
-            p=aug_prob,
-            n_swaps=n_ops,
-            delete_p=aug_prob,
-            n_inserts=n_ops,
+            strategies=["random_swap", "random_delete", "contextual_insert", "synonym_wordnet"],
+            p=0.3,
+            mode=aug_mode,
+            fasttext_path=fasttext_path,
+            device=device,
+            aug_p=aug_prob,
+            n_ops=n_ops,
             stopwords=stopwords,
         )(tokens),
-        "eda_full": lambda tokens: TextAugmenter(
-            strategies=["random_swap", "random_delete", "random_insert", "random_shuffle", "random_crop", "synonym", "contextual"],
-            p=aug_prob,
-            n_swaps=n_ops,
-            delete_p=aug_prob,
-            n_inserts=n_ops,
-            window_size=window,
+        "eda_translate": lambda tokens: TextAugmenter(
+            strategies=["random_swap", "random_delete", "contextual_insert", "synonym_wordnet", "back_translation"],
+            p=0.3,
+            mode=aug_mode,
+            fasttext_path=fasttext_path,
+            device=device,
+            aug_p=aug_prob,
+            n_ops=n_ops,
             stopwords=stopwords,
+        )(tokens),
+        
+        # Light: structural only (swap + delete)
+        "eda_light": lambda tokens: TextAugmenter(
+            strategies=["random_swap", "random_delete"],
+            p=0.3,
+            mode=aug_mode,
+            aug_p=aug_prob,
+            n_ops=max(1, n_ops // 2),
+        )(tokens),
+        
+        # Semantic: synonym + contextual (pick ONE)
+        "eda_semantic": lambda tokens: TextAugmenter(
+            strategies=["synonym_wordnet", "contextual_substitute"],
+            p=0.5,
+            mode="one_of",  # Apply ONE semantic change to avoid drift
+            fasttext_path=fasttext_path,
+            device=device,
+            aug_p=aug_prob,
+            n_ops=n_ops,
+            stopwords=stopwords,
+        )(tokens),
+        
+        # Heavy: all techniques (use carefully)
+        "eda_heavy": lambda tokens: TextAugmenter(
+            strategies=["random_swap", "random_delete", "random_crop", 
+                       "synonym_wordnet", "contextual_substitute"],
+            p=0.2,  # Lower probability to reduce compounding
+            mode=aug_mode,
+            fasttext_path=fasttext_path,
+            device=device,
+            aug_p=aug_prob,
+            n_ops=n_ops,
+            stopwords=stopwords,
+        )(tokens),
+        
+        # Noise: keyboard typos + OCR errors
+        "eda_noise": lambda tokens: TextAugmenter(
+            strategies=["keyboard", "ocr"],
+            p=0.3,
+            mode="one_of",
+            aug_p=aug_prob,
         )(tokens),
     }
     
-    return aug_map.get(aug_name)
+    return composite_augs.get(aug_name)
 
 
 def create_experiment_name(args: argparse.Namespace) -> str:
@@ -449,9 +519,15 @@ def main():
     pretrained_embeddings = load_pretrained_embeddings(args, vocab)
     
     # Create augmentation function
-    aug_fn = get_augmentation_fn(args.augment, args.aug_prob)
+    aug_fn = get_augmentation_fn(
+        aug_name=args.augment,
+        aug_prob=args.aug_prob,
+        aug_mode=args.aug_mode,
+        fasttext_path=args.pretrained_embeddings,  # Use same path for synonym aug
+        device=device,
+    )
     if aug_fn:
-        print(f"Augmentation: {args.augment} (p={args.aug_prob})")
+        print(f"Augmentation: {args.augment} (p={args.aug_prob}, mode={args.aug_mode})")
     
     # Create data loaders
     print("\nLoading data...")
