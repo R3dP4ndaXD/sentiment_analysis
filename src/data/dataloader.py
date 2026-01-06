@@ -69,6 +69,7 @@ class TextCsvDataset(Dataset):
         
         self.df = pd.read_csv(self.csv_path)
         self.df = self.df.dropna(subset=[text_col])  # Drop NaN texts
+        self.df = self.df.reset_index(drop=True)  # Reset index to sequential after dropna
         
         if text_col not in self.df.columns or label_col not in self.df.columns:
             raise ValueError(
