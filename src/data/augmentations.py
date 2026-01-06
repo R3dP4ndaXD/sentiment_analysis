@@ -330,16 +330,20 @@ def contextual_insert(
 
 def back_translate(
     tokens: List[str],
-    from_model: str = "Helsinki-NLP/opus-mt-ro-en",
-    to_model: str = "Helsinki-NLP/opus-mt-en-ro",
+    model_name: str = "facebook/m2m100_418M",
+    src_lang: str = "ro",
+    tgt_lang: str = "en",
     device: str = "cpu",
 ) -> List[str]:
     """Augment via back-translation: Romanian → English → Romanian.
     
+    Uses M2M100 model which supports 100 languages including Romanian.
+    
     Args:
         tokens: List of tokens
-        from_model: Model for source→intermediate translation
-        to_model: Model for intermediate→source translation
+        model_name: HuggingFace model name (M2M100 or similar)
+        src_lang: Source language code
+        tgt_lang: Intermediate language code for back-translation
         device: Device to run on
     
     Returns:
@@ -351,13 +355,37 @@ def back_translate(
     text = " ".join(tokens)
     
     try:
-        aug = naw.BackTranslationAug(
-            from_model_name=from_model,
-            to_model_name=to_model,
-            device=device,
-        )
-        result = aug.augment(text)
-        return result[0].split() if isinstance(result, list) else result.split()
+        from transformers import M2M100ForConditionalGeneration, M2M100Tokenizer
+        import torch
+        
+        tokenizer = M2M100Tokenizer.from_pretrained(model_name)
+        model = M2M100ForConditionalGeneration.from_pretrained(model_name)
+        model = model.to(device)
+        model.eval()
+        
+        # Step 1: Romanian -> English
+        tokenizer.src_lang = src_lang
+        encoded = tokenizer(text, return_tensors="pt").to(device)
+        with torch.no_grad():
+            generated = model.generate(
+                **encoded, 
+                forced_bos_token_id=tokenizer.get_lang_id(tgt_lang),
+                max_length=256,
+            )
+        intermediate = tokenizer.batch_decode(generated, skip_special_tokens=True)[0]
+        
+        # Step 2: English -> Romanian
+        tokenizer.src_lang = tgt_lang
+        encoded = tokenizer(intermediate, return_tensors="pt").to(device)
+        with torch.no_grad():
+            generated = model.generate(
+                **encoded,
+                forced_bos_token_id=tokenizer.get_lang_id(src_lang),
+                max_length=256,
+            )
+        back_translated = tokenizer.batch_decode(generated, skip_special_tokens=True)[0]
+        
+        return back_translated.split() if back_translated else tokens
     
     except Exception as e:
         print(f"Warning: Back-translation failed: {e}")
@@ -499,7 +527,10 @@ class TextAugmenter:
         if fasttext_path:
             _FASTTEXT_MODEL_PATH = fasttext_path
         
-        # Build augmenters
+        # Track if back_translation is requested (handled separately)
+        self.use_back_translation = "back_translation" in self.strategies
+        
+        # Build augmenters (excluding back_translation which is handled separately)
         self.augmenters = self._build_augmenters()
         self.flow = self._build_flow()
     
@@ -596,11 +627,9 @@ class TextAugmenter:
             )
         
         elif strategy == "back_translation":
-            return naw.BackTranslationAug(
-                from_model_name="Helsinki-NLP/opus-mt-ro-en",
-                to_model_name="Helsinki-NLP/opus-mt-en-ro",
-                device=self.device,
-            )
+            # Use custom wrapper since Helsinki-NLP models are deprecated
+            # Return None here - we'll handle back_translation specially in __call__
+            return None
         
         elif strategy == "keyboard":
             return nac.KeyboardAug(
@@ -650,6 +679,23 @@ class TextAugmenter:
         """
         if not tokens:
             return tokens
+        
+        # Handle back_translation separately (uses custom M2M100 implementation)
+        if self.use_back_translation:
+            if self.mode == "one_of" and not self.augmenters:
+                # Only back_translation was requested
+                return back_translate(tokens, device=self.device)
+            elif self.mode == "one_of":
+                # Randomly choose between back_translation and other augmenters
+                if random.random() < 1.0 / (len(self.augmenters) + 1):
+                    return back_translate(tokens, device=self.device)
+            elif self.mode == "sometimes":
+                # Apply back_translation with probability p
+                if random.random() < self.p:
+                    tokens = back_translate(tokens, device=self.device)
+            elif self.mode == "sequential":
+                # Apply back_translation in sequence
+                tokens = back_translate(tokens, device=self.device)
         
         if not self.augmenters:
             return tokens

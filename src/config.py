@@ -50,7 +50,7 @@ class Paths:
 @dataclass
 class DataConfig:
     """Data processing configuration."""
-    max_seq_len: int = 128
+    max_seq_len: int = 160
     min_freq: int = 2  # Minimum word frequency to include in vocab
     max_vocab_size: int = 30000
     

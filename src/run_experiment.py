@@ -98,28 +98,43 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--gradient_clip", type=float, default=1.0, help="Gradient clipping norm (0 to disable)")
     
     # Data configuration
-    parser.add_argument("--max_seq_len", type=int, default=128, help="Maximum sequence length")
+    parser.add_argument("--max_seq_len", type=int, default=160, help="Maximum sequence length")
     parser.add_argument("--min_freq", type=int, default=2, help="Minimum word frequency for vocabulary")
     parser.add_argument("--max_vocab_size", type=int, default=50000, help="Maximum vocabulary size")
+    parser.add_argument("--remove_stopwords", action="store_true", help="Remove stopwords (keeps sentiment words)")
     
     # Augmentation
     parser.add_argument(
         "--augment", type=str, default=None,
         choices=[
-            # Single augmentations
-            "random_swap", "random_delete", "random_crop", "insert"
-            "synonym", "contextual", "back_translate", "keyboard", "ocr",
-            # Composite augmentations (nlpaug flows)
-            "eda", "eda_translate", "eda_light", "eda_semantic", "eda_heavy", "eda_noise",
+            # Single augmentations (online - fast)
+            "random_swap", "random_delete", "random_crop", "insert",
+            "synonym", "keyboard", "ocr",
+            # Composite augmentations (nlpaug flows - online)
+            "eda", "eda_light", "eda_noise",
             "none"
         ],
-        help="Data augmentation technique. Single ops or composites (eda_*)"
+        help="Data augmentation technique."
     )
-    parser.add_argument("--aug_prob", type=float, default=0.1, help="Augmentation probability/intensity")
+    parser.add_argument("--aug_prob", type=float, default=0.3, help="Augmentation probability/intensity")
     parser.add_argument(
         "--aug_mode", type=str, default="sometimes",
         choices=["sometimes", "sequential", "one_of"],
         help="How to apply multiple augmentations (sometimes=probabilistic, sequential=all, one_of=pick one)"
+    )
+    
+    # Dataset expansion and balancing
+    parser.add_argument(
+        "--expand_factor", type=float, default=1.0,
+        help="Multiply training set size with augmented samples (1.0 = no expansion)"
+    )
+    parser.add_argument(
+        "--balance_classes", action="store_true",
+        help="Balance classes by oversampling minority class with augmentation"
+    )
+    parser.add_argument(
+        "--weighted_sampler", action="store_true",
+        help="Use WeightedRandomSampler to balance batch class distribution"
     )
     
     # Embeddings
@@ -196,19 +211,9 @@ def get_augmentation_fn(aug_name: str, aug_prob: float, aug_mode: str = "sometim
     
     # Composite augmentations using TextAugmenter with nlpaug flows
     composite_augs = {
-        # Standard EDA: swap, delete, synonym (probabilistic)
+        # Standard EDA: swap, delete, insert, synonym (probabilistic)
         "eda": lambda tokens: TextAugmenter(
             strategies=["random_swap", "random_delete", "contextual_insert", "synonym_wordnet"],
-            p=0.3,
-            mode=aug_mode,
-            fasttext_path=fasttext_path,
-            device=device,
-            aug_p=aug_prob,
-            n_ops=n_ops,
-            stopwords=stopwords,
-        )(tokens),
-        "eda_translate": lambda tokens: TextAugmenter(
-            strategies=["random_swap", "random_delete", "contextual_insert", "synonym_wordnet", "back_translation"],
             p=0.3,
             mode=aug_mode,
             fasttext_path=fasttext_path,
@@ -529,6 +534,13 @@ def main():
     if aug_fn:
         print(f"Augmentation: {args.augment} (aug_prob={args.aug_prob}, mode={args.aug_mode})")
     
+    # Create tokenizer with optional stopword removal
+    if args.remove_stopwords:
+        print("Stopword removal: ENABLED (preserving sentiment words)")
+        tokenizer_fn = lambda text: tokenize(text, remove_stopwords=True, keep_sentiment_words=True)
+    else:
+        tokenizer_fn = tokenize
+    
     # Create data loaders
     print("\nLoading data...")
     train_loader, val_loader, test_loader = create_dataloaders(
@@ -536,15 +548,26 @@ def main():
         val_path=data_dir / "val.csv",
         test_path=data_dir / "test.csv",
         vocab=vocab,
-        tokenizer=tokenize,
+        tokenizer=tokenizer_fn,
         batch_size=args.batch_size,
         max_seq_len=args.max_seq_len,
         augment_fn=aug_fn,
         augment_prob=args.aug_prob,
         num_workers=0,  # Set > 0 for parallel loading
+        # Dataset expansion and balancing options
+        expand_factor=args.expand_factor,
+        balance_classes=args.balance_classes,
+        use_weighted_sampler=args.weighted_sampler,
     )
     
-    print(f"  Train samples: {len(train_loader.dataset)}")
+    # Print dataset statistics
+    train_ds = train_loader.dataset
+    print(f"  Train samples: {len(train_ds)}")
+    if hasattr(train_ds, 'class_counts'):
+        print(f"    Class distribution: {train_ds.class_counts}")
+        total = sum(train_ds.class_counts.values())
+        for label, count in train_ds.class_counts.items():
+            print(f"      Label {label}: {count} ({100*count/total:.1f}%)")
     print(f"  Val samples: {len(val_loader.dataset)}")
     print(f"  Test samples: {len(test_loader.dataset)}")
     

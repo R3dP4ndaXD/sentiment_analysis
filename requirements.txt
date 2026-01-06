@@ -7,3 +7,6 @@ fasttext>=0.9.2
 torch>=2.2.0
 nlpaug>=1.1.11
 transformers>=4.57.3
+nltk>=3.9.2
+wordcloud
+sentencepiece
