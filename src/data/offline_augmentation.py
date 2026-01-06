@@ -175,18 +175,13 @@ def compute_augmentation_counts(
         target_minority = int(majority_count * target_ratio)
         minority_augments_needed = max(0, target_minority - minority_count)
         
-        # Augment minority class
+        # Only augment minority class to achieve balance
         aug_counts[minority_label] = minority_augments_needed
+        aug_counts[majority_label] = 0  # Don't augment majority when balancing
         
-        # Optionally augment majority class too
-        if not minority_only:
-            # Add same number of augments per sample as minority would get on average
-            avg_aug_per_minority = minority_augments_needed / minority_count if minority_count > 0 else 0
-            aug_counts[majority_label] = int(majority_count * min(avg_aug_per_minority, augment_per_sample))
-        else:
-            aug_counts[majority_label] = 0
+        print(f"\n  Balancing: adding {minority_augments_needed} samples to minority class")
     else:
-        # Simple augmentation: same number per sample
+        # No balancing: augment based on augment_per_sample
         for label in labels:
             if minority_only and label == majority_label:
                 aug_counts[label] = 0

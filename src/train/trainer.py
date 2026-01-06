@@ -330,6 +330,7 @@ class Trainer:
                     f"Val Loss: {val_loss:.4f} | "
                     f"Train Acc: {train_metrics['accuracy']:.4f} | "
                     f"Val Acc: {val_metrics['accuracy']:.4f} | "
+                    f"Train F1: {train_metrics['f1']:.4f} | "
                     f"Val F1: {val_metrics['f1']:.4f} | "
                     f"LR: {current_lr:.2e} | "
                     f"Time: {epoch_time:.1f}s"
