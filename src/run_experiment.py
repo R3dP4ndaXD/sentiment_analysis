@@ -102,6 +102,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--min_freq", type=int, default=2, help="Minimum word frequency for vocabulary")
     parser.add_argument("--max_vocab_size", type=int, default=50000, help="Maximum vocabulary size")
     parser.add_argument("--remove_stopwords", action="store_true", help="Remove stopwords (keeps sentiment words)")
+    parser.add_argument("--num_workers", type=int, default=2, help="DataLoader workers (0=main thread, 2-4 recommended)")
     
     # Augmentation
     parser.add_argument(
@@ -116,7 +117,7 @@ def parse_args() -> argparse.Namespace:
         ],
         help="Data augmentation technique."
     )
-    parser.add_argument("--aug_prob", type=float, default=0.3, help="Augmentation probability/intensity")
+    parser.add_argument("--aug_prob", type=float, default=0.2, help="Augmentation probability/intensity")
     parser.add_argument(
         "--aug_mode", type=str, default="sometimes",
         choices=["sometimes", "sequential", "one_of"],
@@ -553,7 +554,7 @@ def main():
         max_seq_len=args.max_seq_len,
         augment_fn=aug_fn,
         augment_prob=args.aug_prob,
-        num_workers=0,  # Set > 0 for parallel loading
+        num_workers=args.num_workers,  # 2-4 workers recommended for parallel loading
         # Dataset expansion and balancing options
         expand_factor=args.expand_factor,
         balance_classes=args.balance_classes,
