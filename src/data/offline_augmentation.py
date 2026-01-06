@@ -33,6 +33,7 @@ import pandas as pd
 from src.data.augmentations import (
     back_translate,
     contextual_word_replacement,
+    contextual_insert,
     synonym_replacement_wordnet,
     random_swap,
     random_delete,
@@ -49,9 +50,9 @@ def parse_args():
     parser.add_argument("--output", type=str, required=True, help="Output CSV path")
     parser.add_argument(
         "--augment", type=str, nargs="+", 
-        choices=["back_translate", "contextual", "synonym", "swap", "delete"],
+        choices=["back_translate", "contextual", "contextual_insert", "synonym", "swap", "delete"],
         default=["back_translate"],
-        help="Augmentation techniques to apply"
+        help="Augmentation techniques to apply (split evenly across techniques)"
     )
     parser.add_argument(
         "--augment_per_sample", type=int, default=1,
@@ -94,6 +95,10 @@ def get_augmentation_fn(
     elif aug_name == "contextual":
         return lambda tokens: contextual_word_replacement(
             tokens, n_replacements=2, device=device
+        )
+    elif aug_name == "contextual_insert":
+        return lambda tokens: contextual_insert(
+            tokens, n_inserts=2, device=device
         )
     elif aug_name == "synonym":
         return lambda tokens: synonym_replacement_wordnet(tokens, n_replacements=2)
