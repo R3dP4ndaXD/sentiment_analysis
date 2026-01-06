@@ -226,7 +226,7 @@ def get_augmentation_fn(aug_name: str, aug_prob: float, aug_mode: str = "sometim
         
         # Light: structural only (swap + delete)
         "eda_light": lambda tokens: TextAugmenter(
-            strategies=["random_swap", "random_delete"],
+            strategies=["random_swap", "random_delete", "synonym_wordnet"],
             p=0.3,
             mode=aug_mode,
             aug_p=aug_prob,

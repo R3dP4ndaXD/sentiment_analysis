@@ -242,42 +242,58 @@ def main():
         class_df = df[df[args.label_col] == label]
         class_texts = class_df[args.text_col].tolist()
         
+        # Split count evenly across augmentation techniques
+        n_augs = len(args.augment)
+        base_count = count // n_augs
+        remainder = count % n_augs
+        
         print(f"\nGenerating {count} augmented samples for label {label}...")
+        print(f"  Splitting across {n_augs} techniques: {args.augment}")
         
-        # Generate augmentations
-        generated = 0
-        attempts = 0
-        max_attempts = count * 3  # Prevent infinite loops
-        
-        pbar = tqdm(total=count, desc=f"Label {label}")
-        
-        while generated < count and attempts < max_attempts:
-            # Sample a random text from this class
-            text = random.choice(class_texts)
+        for aug_idx, aug_name in enumerate(args.augment):
+            # Distribute remainder to first few augmenters
+            aug_count = base_count + (1 if aug_idx < remainder else 0)
+            if aug_count == 0:
+                continue
             
-            try:
-                # Apply augmentation
-                aug_text = augment_text(text, augment_fns)
+            aug_fn = augment_fns[aug_idx]
+            
+            print(f"  {aug_name}: {aug_count} samples")
+            
+            # Generate augmentations for this technique
+            generated = 0
+            attempts = 0
+            max_attempts = aug_count * 3  # Prevent infinite loops
+            
+            pbar = tqdm(total=aug_count, desc=f"Label {label} [{aug_name}]")
+            
+            while generated < aug_count and attempts < max_attempts:
+                # Sample a random text from this class
+                text = random.choice(class_texts)
                 
-                # Check if augmentation produced something different
-                if aug_text and aug_text != text and len(aug_text) > 10:
-                    output_rows.append({
-                        args.text_col: aug_text,
-                        args.label_col: label,
-                        "augmented": True,
-                        "aug_type": "+".join(args.augment),
-                    })
-                    generated += 1
-                    pbar.update(1)
-            except Exception as e:
-                print(f"Warning: Augmentation failed: {e}")
+                try:
+                    # Apply single augmentation (not chained)
+                    aug_text = augment_text(text, [aug_fn])
+                    
+                    # Check if augmentation produced something different
+                    if aug_text and aug_text != text and len(aug_text) > 10:
+                        output_rows.append({
+                            args.text_col: aug_text,
+                            args.label_col: label,
+                            "augmented": True,
+                            "aug_type": aug_name,
+                        })
+                        generated += 1
+                        pbar.update(1)
+                except Exception as e:
+                    print(f"Warning: {aug_name} failed: {e}")
+                
+                attempts += 1
             
-            attempts += 1
-        
-        pbar.close()
-        
-        if generated < count:
-            print(f"Warning: Only generated {generated}/{count} samples for label {label}")
+            pbar.close()
+            
+            if generated < aug_count:
+                print(f"Warning: Only generated {generated}/{aug_count} samples for {aug_name}")
     
     # Create output DataFrame
     output_df = pd.DataFrame(output_rows)
