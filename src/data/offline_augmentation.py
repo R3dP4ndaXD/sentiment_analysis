@@ -24,6 +24,7 @@ Usage:
 """
 import argparse
 import random
+import re
 from pathlib import Path
 from typing import List, Optional, Callable
 from tqdm import tqdm
@@ -39,6 +40,52 @@ from src.data.augmentations import (
     random_delete,
 )
 from src.preprocessing.text import tokenize, detokenize
+
+
+def normalize_for_comparison(text: str) -> str:
+    """Normalize text for comparison (remove punctuation, lowercase, collapse whitespace)."""
+    text = text.lower()
+    text = re.sub(r'[^\w\s]', '', text)  # Remove punctuation
+    text = re.sub(r'\s+', ' ', text).strip()  # Collapse whitespace
+    return text
+
+
+def is_meaningful_augmentation(original: str, augmented: str, min_diff_ratio: float = 0.1) -> bool:
+    """Check if augmentation produced meaningful change (not just punctuation).
+    
+    Args:
+        original: Original text
+        augmented: Augmented text
+        min_diff_ratio: Minimum ratio of changed words to consider meaningful
+    
+    Returns:
+        True if augmentation is meaningful
+    """
+    if not augmented or len(augmented) < 10:
+        return False
+    
+    # Normalize both texts
+    norm_orig = normalize_for_comparison(original)
+    norm_aug = normalize_for_comparison(augmented)
+    
+    # If normalized texts are identical, it's just punctuation change
+    if norm_orig == norm_aug:
+        return False
+    
+    # Check word-level difference
+    orig_words = set(norm_orig.split())
+    aug_words = set(norm_aug.split())
+    
+    # Calculate symmetric difference (words in one but not the other)
+    diff_words = orig_words.symmetric_difference(aug_words)
+    total_words = len(orig_words.union(aug_words))
+    
+    if total_words == 0:
+        return False
+    
+    diff_ratio = len(diff_words) / total_words
+    
+    return diff_ratio >= min_diff_ratio
 
 
 def parse_args():
@@ -275,8 +322,9 @@ def main():
                     # Apply single augmentation (not chained)
                     aug_text = augment_text(text, [aug_fn])
                     
-                    # Check if augmentation produced something different
-                    if aug_text and aug_text != text and len(aug_text) > 10:
+                    # Check if augmentation produced meaningful change
+                    # (not just punctuation or minor formatting)
+                    if is_meaningful_augmentation(text, aug_text):
                         output_rows.append({
                             args.text_col: aug_text,
                             args.label_col: label,
