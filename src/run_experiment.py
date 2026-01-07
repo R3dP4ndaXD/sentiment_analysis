@@ -112,7 +112,7 @@ def parse_args() -> argparse.Namespace:
             "random_swap", "random_delete", "random_crop", "insert",
             "synonym", "keyboard", "ocr",
             # Composite augmentations (nlpaug flows - online)
-            "eda","eda_plus", "eda_light", "eda_noise",
+            "eda", "eda_plus", "eda_light", "eda_noise",
             "none"
         ],
         help="Data augmentation technique."
@@ -224,7 +224,7 @@ def get_augmentation_fn(aug_name: str, aug_prob: float, aug_mode: str = "sometim
             stopwords=stopwords,
         )(tokens),
         "eda_plus": lambda tokens: TextAugmenter(
-            strategies=["random_swap", "random_delete", "contextual_insert", "contextual_replace", "synonym_wordnet"],
+            strategies=["random_swap", "random_delete", "contextual_insert", "contextual_substitute", "synonym_wordnet"],
             p=0.3,
             mode=aug_mode,
             fasttext_path=fasttext_path,
