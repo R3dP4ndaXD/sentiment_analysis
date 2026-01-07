@@ -17,6 +17,9 @@ from .visualize import (
     create_results_summary,
 )
 
+# Note: generate_visualizations is a standalone script, run with:
+#   python -m src.evaluate.generate_visualizations --help
+
 __all__ = [
     # Metrics
     "compute_metrics",

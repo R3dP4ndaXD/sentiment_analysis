@@ -10,3 +10,4 @@ transformers>=4.57.3
 nltk>=3.9.2
 wordcloud
 sentencepiece
+tabulate

@@ -50,12 +50,12 @@ def parse_args():
     parser.add_argument("--output", type=str, required=True, help="Output CSV path")
     parser.add_argument(
         "--augment", type=str, nargs="+", 
-        choices=["back_translate", "contextual", "contextual_insert", "synonym", "swap", "delete"],
+        choices=["back_translate", "contextual_replace", "contextual_insert", "synonym", "swap", "delete"],
         default=["back_translate"],
         help="Augmentation techniques to apply (split evenly across techniques)"
     )
     parser.add_argument(
-        "--augment_per_sample", type=int, default=1,
+        "--augment_per_sample", type=float, default=1.0,
         help="Number of augmented versions to generate per sample"
     )
     parser.add_argument(
@@ -92,7 +92,7 @@ def get_augmentation_fn(
     """Get augmentation function by name."""
     if aug_name == "back_translate":
         return lambda tokens: back_translate(tokens, device=device)
-    elif aug_name == "contextual":
+    elif aug_name == "contextual_replace":
         return lambda tokens: contextual_word_replacement(
             tokens, n_replacements=2, device=device
         )
@@ -145,7 +145,7 @@ def augment_text(
 def compute_augmentation_counts(
     df: pd.DataFrame,
     label_col: str,
-    augment_per_sample: int,
+    augment_per_sample: float,
     balance: bool,
     target_ratio: float,
     minority_only: bool,
