@@ -279,6 +279,7 @@ def main():
                 "aug_type": "original",
             })
     
+    print("test")
     # Generate augmented samples
     for label in aug_counts:
         count = aug_counts[label]
