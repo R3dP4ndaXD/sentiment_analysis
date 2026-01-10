@@ -86,7 +86,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--num_layers", type=int, default=2, help="Number of RNN/LSTM layers")
     parser.add_argument("--dropout", type=float, default=0.5, help="Dropout probability")
     parser.add_argument("--bidirectional", action="store_true", help="Use bidirectional LSTM")
-    parser.add_argument("--pooling", type=str, default="last", choices=["last", "max", "mean"], help="Pooling strategy")
+    parser.add_argument("--pooling", type=str, default="max", choices=["last", "max", "mean"], help="Pooling strategy")
     
     # Training hyperparameters
     parser.add_argument("--epochs", type=int, default=20, help="Number of training epochs")
@@ -112,14 +112,14 @@ def parse_args() -> argparse.Namespace:
             "random_swap", "random_delete", "random_crop", "insert",
             "synonym", "keyboard", "ocr",
             # Composite augmentations (nlpaug flows - online)
-            "eda", "eda_plus", "eda_light", "eda_noise",
+            "eda", "eda_plus", "semantic", "eda_light", "noise",
             "none"
         ],
         help="Data augmentation technique."
     )
     parser.add_argument("--aug_prob", type=float, default=0.2, help="Augmentation probability/intensity")
     parser.add_argument(
-        "--aug_mode", type=str, default="sometimes",
+        "--aug_mode", type=str, default="one_of",
         choices=["sometimes", "sequential", "one_of"],
         help="How to apply multiple augmentations (sometimes=probabilistic, sequential=all, one_of=pick one)"
     )
@@ -185,7 +185,7 @@ def get_augmentation_fn(aug_name: str, aug_prob: float, aug_mode: str = "sometim
         return None
     
     # Convert probability to discrete count for swap/insert (1-5 operations)
-    n_ops = max(1, int(aug_prob * 10)) if aug_prob else 1
+    n_ops = max(1, int(aug_prob * 5)) if aug_prob else 1
     
     # Load Romanian stopwords
     stopwords = get_romanian_stopwords()
@@ -199,7 +199,7 @@ def get_augmentation_fn(aug_name: str, aug_prob: float, aug_mode: str = "sometim
         "synonym": lambda tokens: synonym_replacement_fasttext(
             tokens, n_replacements=n_ops, model_path=fasttext_path, stopwords=stopwords
         ),
-        "contextual": lambda tokens: contextual_word_replacement(
+        "contextual_replace": lambda tokens: contextual_word_replacement(
             tokens, n_replacements=n_ops, stopwords=stopwords, device=device
         ),
         "back_translate": lambda tokens: back_translate(tokens, device=device),
@@ -233,6 +233,16 @@ def get_augmentation_fn(aug_name: str, aug_prob: float, aug_mode: str = "sometim
             n_ops=n_ops,
             stopwords=stopwords,
         )(tokens),
+        "semantic": lambda tokens: TextAugmenter(
+            strategies=["synonym_fasttext", "contextual_insert", "contextual_substitute"],
+            p=0.3,
+            mode=aug_mode,
+            fasttext_path=fasttext_path,
+            device=device,
+            aug_p=aug_prob,
+            n_ops=n_ops,
+            stopwords=stopwords,
+        )(tokens),
         # Light: structural only (swap + delete)
         "eda_light": lambda tokens: TextAugmenter(
             strategies=["random_swap", "random_delete", "synonym_wordnet"],
@@ -242,33 +252,8 @@ def get_augmentation_fn(aug_name: str, aug_prob: float, aug_mode: str = "sometim
             n_ops=max(1, n_ops // 2),
         )(tokens),
         
-        # Semantic: synonym + contextual (pick ONE)
-        "eda_semantic": lambda tokens: TextAugmenter(
-            strategies=["synonym_wordnet", "contextual_substitute"],
-            p=0.5,
-            mode="one_of",  # Apply ONE semantic change to avoid drift
-            fasttext_path=fasttext_path,
-            device=device,
-            aug_p=aug_prob,
-            n_ops=n_ops,
-            stopwords=stopwords,
-        )(tokens),
-        
-        # Heavy: all techniques (use carefully)
-        "eda_heavy": lambda tokens: TextAugmenter(
-            strategies=["random_swap", "random_delete", "random_crop", 
-                       "synonym_wordnet", "contextual_substitute"],
-            p=0.2,  # Lower probability to reduce compounding
-            mode=aug_mode,
-            fasttext_path=fasttext_path,
-            device=device,
-            aug_p=aug_prob,
-            n_ops=n_ops,
-            stopwords=stopwords,
-        )(tokens),
-        
         # Noise: keyboard typos + OCR errors
-        "eda_noise": lambda tokens: TextAugmenter(
+        "noise": lambda tokens: TextAugmenter(
             strategies=["keyboard", "ocr"],
             p=0.3,
             mode="one_of",
