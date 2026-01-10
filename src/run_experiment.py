@@ -350,10 +350,12 @@ def create_model(
     
     model_map = {
         "simple_rnn": lambda: SimpleRNN(
+            bidirectional=args.bidirectional,
             pooling=args.pooling,
             **common_kwargs,
         ),
         "stacked_rnn": lambda: StackedRNN(
+            bidirectional=args.bidirectional,
             pooling=args.pooling,
             **common_kwargs,
         ),
