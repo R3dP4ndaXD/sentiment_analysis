@@ -261,7 +261,8 @@ class Trainer:
         """Run full training loop.
         
         Args:
-            epochs: Number of epochs to train
+            epochs: Number of addtional epochs to train when resuming,
+                   or total epochs for fresh start
             callbacks: List of callback objects
             verbose: Print progress
         
@@ -270,15 +271,35 @@ class Trainer:
         """
         callbacks = callbacks or []
         
+        # Reset stop flag (in case resuming after early stop)
+        self.stop_training = False
+        
+        # Calculate starting epoch from preserved history
+        start_epoch = len(self.history.train_loss)
+        
+        # Total epochs = previous + new requested epochs
+        if start_epoch > 0:
+            # Resuming: epochs parameter means ADDITIONAL epochs
+            total_epochs = start_epoch + epochs
+            if verbose:
+                print(f"Resuming from epoch {start_epoch + 1}")
+                print(f"  Training {epochs} more epochs (total: {total_epochs})")
+        else:
+            # Fresh start
+            total_epochs = epochs
+        
         # Initialize cosine scheduler if requested
         if self.scheduler_name and self.scheduler_name.lower() == "cosine":
-            self.scheduler = CosineAnnealingLR(self.optimizer, T_max=epochs)
+            self.scheduler = CosineAnnealingLR(self.optimizer, T_max=total_epochs)
+            # Fast-forward scheduler if resuming
+            for _ in range(start_epoch):
+                self.scheduler.step()
         
         # Callback: on_train_begin
         for cb in callbacks:
             cb.on_train_begin(self)
         
-        for epoch in range(epochs):
+        for epoch in range(start_epoch, total_epochs):
             self.current_epoch = epoch
             epoch_start = time.time()
             
@@ -325,7 +346,7 @@ class Trainer:
             # Print progress
             if verbose:
                 print(
-                    f"Epoch {epoch+1}/{epochs} | "
+                    f"Epoch {epoch+1}/{total_epochs} | "
                     f"Train Loss: {train_loss:.4f} | "
                     f"Val Loss: {val_loss:.4f} | "
                     f"Train Acc: {train_metrics['accuracy']:.4f} | "

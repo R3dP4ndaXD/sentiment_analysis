@@ -84,14 +84,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--embedding_dim", type=int, default=300, help="Embedding dimension")
     parser.add_argument("--hidden_dim", type=int, default=256, help="Hidden state dimension")
     parser.add_argument("--num_layers", type=int, default=2, help="Number of RNN/LSTM layers")
-    parser.add_argument("--dropout", type=float, default=0.3, help="Dropout probability")
+    parser.add_argument("--dropout", type=float, default=0.5, help="Dropout probability")
     parser.add_argument("--bidirectional", action="store_true", help="Use bidirectional LSTM")
     parser.add_argument("--pooling", type=str, default="last", choices=["last", "max", "mean"], help="Pooling strategy")
     
     # Training hyperparameters
     parser.add_argument("--epochs", type=int, default=20, help="Number of training epochs")
     parser.add_argument("--batch_size", type=int, default=64, help="Batch size")
-    parser.add_argument("--lr", type=float, default=1e-3, help="Learning rate")
+    parser.add_argument("--lr", type=float, default=1e-4, help="Learning rate")
     parser.add_argument("--weight_decay", type=float, default=1e-5, help="L2 regularization")
     parser.add_argument("--optimizer", type=str, default="adamw", choices=["adam", "adamw", "sgd"], help="Optimizer")
     parser.add_argument("--scheduler", type=str, default="plateau", choices=["plateau", "cosine", "none"], help="LR scheduler")
@@ -499,6 +499,12 @@ def generate_plots(
 def main():
     """Main entry point."""
     args = parse_args()
+    
+    # Check for conflicting options
+    if args.weighted_sampler and args.balance_classes:
+        print("⚠️  Warning: --weighted_sampler and --balance_classes are redundant")
+        print("   Using --weighted_sampler only (disabling --balance_classes)")
+        args.balance_classes = False
     
     # Set random seed
     set_seed(args.seed)
