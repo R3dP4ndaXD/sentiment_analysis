@@ -487,12 +487,6 @@ def main():
     """Main entry point."""
     args = parse_args()
     
-    # Check for conflicting options
-    if args.weighted_sampler and args.balance_classes:
-        print("⚠️  Warning: --weighted_sampler and --balance_classes are redundant")
-        print("   Using --weighted_sampler only (disabling --balance_classes)")
-        args.balance_classes = False
-    
     # Set random seed
     set_seed(args.seed)
     print(f"Random seed: {args.seed}")

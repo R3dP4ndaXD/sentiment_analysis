@@ -32,7 +32,7 @@ class LSTMClassifier(SentimentClassifier):
         pad_idx: int = 0,
         pretrained_embeddings: Optional[torch.Tensor] = None,
         freeze_embeddings: bool = False,
-        pooling: str = "last",
+        pooling: str = "max",
     ):
         """
         Args:
@@ -302,7 +302,7 @@ class LSTMWithBatchNorm(SentimentClassifier):
         pad_idx: int = 0,
         pretrained_embeddings: Optional[torch.Tensor] = None,
         freeze_embeddings: bool = False,
-        pooling: str = "last",
+        pooling: str = "max",
     ):
         super().__init__(
             vocab_size=vocab_size,
@@ -393,7 +393,7 @@ class StackedLSTM(SentimentClassifier):
         pad_idx: int = 0,
         pretrained_embeddings: Optional[torch.Tensor] = None,
         freeze_embeddings: bool = False,
-        pooling: str = "last",
+        pooling: str = "max",
         use_layer_norm: bool = True,
         use_residual: bool = True,
     ):
