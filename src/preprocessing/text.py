@@ -66,7 +66,64 @@ def get_spacy_nlp(model: str = "ro_core_news_sm"):
     return _NLP
 
 
-def clean_text(s: str, keep_digits: bool = True, keep_punctuation: bool = False) -> str:
+from bs4 import BeautifulSoup
+
+
+
+def clean_text(s: str) -> str:
+    """
+    Robust cleaning that removes HTML but keeps Sentiment Signals 
+    (Emojis, Punctuation, Diacritics).
+    """
+    if not isinstance(s, str):
+        return str(s)
+
+    # 1. Safe HTML Removal using BeautifulSoup
+    if "<" in s or ">" in s:  # Check for any angle brackets
+        # First normalize malformed HTML tags like "< br />" -> "<br />"
+        s = re.sub(r'<\s+', '<', s)  # Remove space after <
+        s = re.sub(r'\s+>', '>', s)  # Remove space before >
+        s = re.sub(r'/\s+>', '/>', s)  # Normalize " />" to "/>"
+
+        s = BeautifulSoup(s, "html.parser").get_text(separator=" ")
+      
+        
+        # Clean any remaining stray angle brackets or orphan />
+        s = re.sub(r'\s*/\s*>', ' ', s)
+        s = re.sub(r'[<>]', ' ', s)
+
+    # 2. Unicode Normalization
+    s = unicodedata.normalize("NFKC", s)
+    
+    # 3. Handle Romanian Diacritics (Normalize to comma-below)
+    s = normalize_romanian_diacritics(s) 
+
+    # 4. Lowercase
+    s = s.lower()
+
+    # 5. PRESERVE EMOJIS
+    # We do NOT run the regex that strips non-alphanumeric chars yet.
+    # Instead, we only clean invisible control characters and weird symbols.
+    
+    # 6. Clean specific noise but KEEP punctuation usually
+    # Keep: Letters, Numbers, Punctuation (.,!?-), Emojis, Spaces
+    # We remove: Underscores, weird mathematical symbols, etc.
+    
+    # This regex keeps:
+    # \w = letters and numbers
+    # \s = spaces
+    # [^\w\s] = punctuation and emojis (basically everything else)
+    # We only want to remove *specific* garbage if needed. 
+    # Actually, for Deep Learning, it is safer to KEEP mostly everything 
+    # and let the Tokenizer handle the unknown chars (UNK).
+    
+    # Just collapse whitespace
+    s = re.sub(r"\s+", " ", s).strip()
+
+    return s
+
+
+def clean_text_old(s: str, keep_digits: bool = True, keep_punctuation: bool = False) -> str:
     """Clean and normalize Romanian text.
     
     Args:
@@ -122,8 +179,6 @@ def clean_text(s: str, keep_digits: bool = True, keep_punctuation: bool = False)
 def tokenize(
     text: str, 
     use_spacy: bool = True, 
-    keep_digits: bool = True,
-    keep_punctuation: bool = False,
     remove_stopwords: bool = False,
     keep_sentiment_words: bool = True,
 ) -> List[str]:
@@ -132,15 +187,13 @@ def tokenize(
     Args:
         text: Input text string
         use_spacy: Use spaCy tokenizer (recommended) or simple whitespace split
-        keep_digits: Pass through to clean_text
-        keep_punctuation: Pass through to clean_text
         remove_stopwords: Remove Romanian stopwords (default False)
         keep_sentiment_words: Keep sentiment-important words even if stopwords (default True)
     
     Returns:
         List of tokens
     """
-    t = clean_text(text, keep_digits=keep_digits, keep_punctuation=keep_punctuation)
+    t = clean_text(text)
     if use_spacy:
         nlp = get_spacy_nlp()
         doc = nlp(t)
