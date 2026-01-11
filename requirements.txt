@@ -12,3 +12,4 @@ wordcloud
 sentencepiece
 tabulate
 sacremoses
+beautifulsoup4
