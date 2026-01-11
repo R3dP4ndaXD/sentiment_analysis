@@ -80,11 +80,15 @@ def clean_text(s: str, keep_digits: bool = True, keep_punctuation: bool = False)
     # Unicode normalization (NFKC: compatibility decomposition + canonical composition)
     s = unicodedata.normalize("NFKC", s)
     
-    # Remove HTML tags (e.g., <br />, <p>, </p>, <p style="...">, etc.)
-    s = re.sub(r'<[^>]+>', ' ', s)
+    # Remove HTML tags - handles malformed variants like:
+    # <br />, < br />, <br / >, </ p>, < /p>, etc.
+    s = re.sub(r'<\s*/?\s*[a-zA-Z][^>]*\s*/?>', ' ', s)
+    # Also catch any remaining angle bracket patterns
+    s = re.sub(r'<\s*/?[^>]*>', ' ', s)
     
-    # Remove HTML entities (e.g., &nbsp;, &amp;, etc.)
+    # Remove HTML entities (e.g., &nbsp;, &amp;, &#123;, etc.)
     s = re.sub(r'&[a-zA-Z]+;', ' ', s)
+    s = re.sub(r'&#?\w+;', ' ', s)
     
     # Normalize Romanian diacritics (cedilla -> comma-below)
     s = normalize_romanian_diacritics(s)

@@ -195,8 +195,6 @@ def plot_most_frequent_words(
     try:
         from src.preprocessing.text import tokenize
     except ImportError:
-        import warnings
-        warnings.warn("Could not import tokenize from src.preprocessing.text, using simple split")
         tokenize = lambda x: str(x).lower().split()
     
     # Load train data

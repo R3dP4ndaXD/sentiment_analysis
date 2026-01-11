@@ -64,7 +64,7 @@ def is_meaningful_augmentation(original: str, augmented: str, min_diff_ratio: fl
     if not augmented or len(augmented) < 10:
         return False
     
-    # Normalize both texts (remove punctuation, lowercase)
+    # Normalize both texts
     norm_orig = normalize_for_comparison(original)
     norm_aug = normalize_for_comparison(augmented)
     
@@ -72,13 +72,9 @@ def is_meaningful_augmentation(original: str, augmented: str, min_diff_ratio: fl
     if norm_orig == norm_aug:
         return False
     
-    # Check word-level difference using proper tokenization
-    # (normalized text has no punctuation, so tokenize will work correctly)
-    orig_tokens = tokenize(norm_orig) if norm_orig else []
-    aug_tokens = tokenize(norm_aug) if norm_aug else []
-    
-    orig_words = set(orig_tokens)
-    aug_words = set(aug_tokens)
+    # Check word-level difference
+    orig_words = set(norm_orig.split())
+    aug_words = set(norm_aug.split())
     
     # Calculate symmetric difference (words in one but not the other)
     diff_words = orig_words.symmetric_difference(aug_words)
