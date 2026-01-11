@@ -86,6 +86,12 @@ def clean_text(s: str, keep_digits: bool = True, keep_punctuation: bool = False)
     # Also catch any remaining angle bracket patterns
     s = re.sub(r'<\s*/?[^>]*>', ' ', s)
     
+    # Remove orphaned closing tags like /> or / > (leftover fragments)
+    s = re.sub(r'\s*/\s*>', ' ', s)
+    
+    # Remove stray angle brackets that might remain
+    s = re.sub(r'[<>]', ' ', s)
+    
     # Remove HTML entities (e.g., &nbsp;, &amp;, &#123;, etc.)
     s = re.sub(r'&[a-zA-Z]+;', ' ', s)
     s = re.sub(r'&#?\w+;', ' ', s)
