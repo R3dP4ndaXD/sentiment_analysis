@@ -29,12 +29,42 @@ nltk.download('averaged_perceptron_tagger_eng', quiet=True)
 # Cache for expensive models
 _FASTTEXT_MODEL_PATH = None
 _BERT_MODEL_NAME = "dumitrescustefan/bert-base-romanian-cased-v1"
+_SPACY_NLP = None  # Cached spaCy model for retokenization
 
 # =============================================================================
-# Romanian Stopwords
+# Romanian Stopwords & Sentiment Words (exclusion list for augmentation)
 # =============================================================================
 
 _ROMANIAN_STOPWORDS_CACHED = None
+_AUGMENTATION_EXCLUSION_CACHED = None
+
+
+def _get_spacy_tokenizer():
+    """Get cached spaCy tokenizer for consistent retokenization."""
+    global _SPACY_NLP
+    if _SPACY_NLP is None:
+        import spacy
+        _SPACY_NLP = spacy.load("ro_core_news_sm")
+    return _SPACY_NLP
+
+
+def retokenize(text: str) -> List[str]:
+    """Retokenize text using spaCy for consistency with original tokenization.
+    
+    This ensures augmented text is tokenized the same way as original text,
+    handling punctuation, contractions, and Romanian-specific patterns correctly.
+    
+    Args:
+        text: Text string to tokenize
+        
+    Returns:
+        List of tokens
+    """
+    if not text or not text.strip():
+        return []
+    nlp = _get_spacy_tokenizer()
+    doc = nlp(text)
+    return [token.text for token in doc]
 
 
 def get_romanian_stopwords() -> set:
@@ -49,6 +79,26 @@ def get_romanian_stopwords() -> set:
         nlp = spacy.load("ro_core_news_sm")
         _ROMANIAN_STOPWORDS_CACHED = nlp.Defaults.stop_words.copy()
     return _ROMANIAN_STOPWORDS_CACHED
+
+
+def get_augmentation_exclusion_words() -> set:
+    """Get words that should NOT be modified during augmentation.
+    
+    Returns:
+        Combined set of:
+        - Romanian stopwords (not informative, shouldn't waste augmentation on them)
+        - Sentiment-bearing words (critical for classification, must be preserved)
+    
+    This ensures augmentation only modifies neutral content words,
+    preserving both function words and sentiment indicators.
+    """
+    global _AUGMENTATION_EXCLUSION_CACHED
+    if _AUGMENTATION_EXCLUSION_CACHED is None:
+        from src.preprocessing.text import SENTIMENT_KEEP_WORDS
+        
+        # Combine stopwords + sentiment words
+        _AUGMENTATION_EXCLUSION_CACHED = get_romanian_stopwords() | SENTIMENT_KEEP_WORDS
+    return _AUGMENTATION_EXCLUSION_CACHED
 
 
 # =============================================================================
@@ -75,7 +125,8 @@ def random_swap(tokens: List[str], n_swaps: int = 1) -> List[str]:
         aug_max=n_swaps,
     )
     result = aug.augment(text)
-    return result[0].split() if isinstance(result, list) else result.split()
+    result_text = result[0] if isinstance(result, list) else result
+    return retokenize(result_text) or tokens
 
 
 def random_delete(tokens: List[str], p: float = 0.1) -> List[str]:
@@ -98,7 +149,8 @@ def random_delete(tokens: List[str], p: float = 0.1) -> List[str]:
         aug_max=max(1, int(len(tokens) * p * 2)),
     )
     result = aug.augment(text)
-    result_tokens = result[0].split() if isinstance(result, list) else result.split()
+    result_text = result[0] if isinstance(result, list) else result
+    result_tokens = retokenize(result_text)
     
     # Ensure at least one token
     return result_tokens if result_tokens else [random.choice(tokens)]
@@ -125,7 +177,8 @@ def random_crop(tokens: List[str], min_ratio: float = 0.7, max_ratio: float = 0.
         aug_max=max(1, int(len(tokens) * (1 - min_ratio))),
     )
     result = aug.augment(text)
-    result_tokens = result[0].split() if isinstance(result, list) else result.split()
+    result_text = result[0] if isinstance(result, list) else result
+    result_tokens = retokenize(result_text)
     return result_tokens if result_tokens else tokens
 
 
@@ -145,7 +198,7 @@ def synonym_replacement_fasttext(
         tokens: List of tokens
         n_replacements: Number of words to replace
         model_path: Path to fastText model
-        stopwords: Set of words to skip
+        stopwords: Set of words to skip (defaults to stopwords + sentiment words)
     
     Returns:
         Augmented token list
@@ -154,7 +207,8 @@ def synonym_replacement_fasttext(
         return tokens
     
     text = " ".join(tokens)
-    stopwords_list = list(stopwords) if stopwords else get_romanian_stopwords()
+    # Use combined exclusion list (stopwords + sentiment words) by default
+    stopwords_list = list(stopwords) if stopwords else list(get_augmentation_exclusion_words())
     
     global _FASTTEXT_MODEL_PATH
     if model_path:
@@ -191,7 +245,8 @@ def synonym_replacement_fasttext(
         )
         
         result = aug.augment(text)
-        return result[0].split() if isinstance(result, list) else result.split()
+        result_text = result[0] if isinstance(result, list) else result
+        return retokenize(result_text) or tokens
     
     except Exception as e:
         print(f"Warning: FastText synonym augmentation failed: {e}")
@@ -208,7 +263,7 @@ def synonym_replacement_wordnet(
     Args:
         tokens: List of tokens
         n_replacements: Number of words to replace
-        stopwords: Set of words to skip
+        stopwords: Set of words to skip (defaults to stopwords + sentiment words)
     
     Returns:
         Augmented token list
@@ -217,7 +272,8 @@ def synonym_replacement_wordnet(
         return tokens
     
     text = " ".join(tokens)
-    stopwords_list = list(stopwords) if stopwords else list(get_romanian_stopwords())
+    # Use combined exclusion list (stopwords + sentiment words) by default
+    stopwords_list = list(stopwords) if stopwords else list(get_augmentation_exclusion_words())
     
     try:
         aug = naw.SynonymAug(
@@ -229,7 +285,8 @@ def synonym_replacement_wordnet(
             stopwords=stopwords_list,
         )
         result = aug.augment(text)
-        return result[0].split() if isinstance(result, list) else result.split()
+        result_text = result[0] if isinstance(result, list) else result
+        return retokenize(result_text) or tokens
     
     except Exception as e:
         print(f"Warning: WordNet augmentation failed: {e}")
@@ -253,7 +310,7 @@ def contextual_word_replacement(
         tokens: List of tokens
         n_replacements: Number of words to replace
         model_name: HuggingFace model name
-        stopwords: Words to skip
+        stopwords: Words to skip (defaults to stopwords + sentiment words)
         device: Device to run on ('cpu' or 'cuda')
     
     Returns:
@@ -264,7 +321,8 @@ def contextual_word_replacement(
     
     text = " ".join(tokens)
     model_name = model_name or _BERT_MODEL_NAME
-    stopwords_list = list(stopwords) if stopwords else get_romanian_stopwords()
+    # Use combined exclusion list (stopwords + sentiment words) by default
+    stopwords_list = list(stopwords) if stopwords else list(get_augmentation_exclusion_words())
     
     try:
         aug = naw.ContextualWordEmbsAug(
@@ -277,7 +335,8 @@ def contextual_word_replacement(
             device=device,
         )
         result = aug.augment(text)
-        return result[0].split() if isinstance(result, list) else result.split()
+        result_text = result[0] if isinstance(result, list) else result
+        return retokenize(result_text) or tokens
     
     except Exception as e:
         print(f"Warning: Contextual augmentation failed: {e}")
@@ -317,7 +376,8 @@ def contextual_insert(
             device=device,
         )
         result = aug.augment(text)
-        return result[0].split() if isinstance(result, list) else result.split()
+        result_text = result[0] if isinstance(result, list) else result
+        return retokenize(result_text) or tokens
     
     except Exception as e:
         print(f"Warning: Contextual insert failed: {e}")
@@ -330,21 +390,19 @@ def contextual_insert(
 
 def back_translate(
     tokens: List[str],
-    model_name: str = "facebook/m2m100_418M",
-    src_lang: str = "ro",
-    tgt_lang: str = "en",
+    from_model: str = "Helsinki-NLP/opus-mt-roa-en",
+    to_model: str = "Helsinki-NLP/opus-mt-en-ro",
     device: str = "cpu",
 ) -> List[str]:
     """Augment via back-translation: Romanian → English → Romanian.
     
-    Uses M2M100 model which supports 100 languages including Romanian.
+    Uses Helsinki-NLP OPUS-MT models via nlpaug's BackTranslationAug.
     
     Args:
         tokens: List of tokens
-        model_name: HuggingFace model name (M2M100 or similar)
-        src_lang: Source language code
-        tgt_lang: Intermediate language code for back-translation
-        device: Device to run on
+        from_model: Model for source→intermediate translation (ro→en)
+        to_model: Model for intermediate→source translation (en→ro)
+        device: Device to run on ('cpu' or 'cuda')
     
     Returns:
         Augmented token list
@@ -355,37 +413,14 @@ def back_translate(
     text = " ".join(tokens)
     
     try:
-        from transformers import M2M100ForConditionalGeneration, M2M100Tokenizer
-        import torch
-        
-        tokenizer = M2M100Tokenizer.from_pretrained(model_name)
-        model = M2M100ForConditionalGeneration.from_pretrained(model_name)
-        model = model.to(device)
-        model.eval()
-        
-        # Step 1: Romanian -> English
-        tokenizer.src_lang = src_lang
-        encoded = tokenizer(text, return_tensors="pt").to(device)
-        with torch.no_grad():
-            generated = model.generate(
-                **encoded, 
-                forced_bos_token_id=tokenizer.get_lang_id(tgt_lang),
-                max_length=256,
-            )
-        intermediate = tokenizer.batch_decode(generated, skip_special_tokens=True)[0]
-        
-        # Step 2: English -> Romanian
-        tokenizer.src_lang = tgt_lang
-        encoded = tokenizer(intermediate, return_tensors="pt").to(device)
-        with torch.no_grad():
-            generated = model.generate(
-                **encoded,
-                forced_bos_token_id=tokenizer.get_lang_id(src_lang),
-                max_length=256,
-            )
-        back_translated = tokenizer.batch_decode(generated, skip_special_tokens=True)[0]
-        
-        return back_translated.split() if back_translated else tokens
+        aug = naw.BackTranslationAug(
+            from_model_name=from_model,
+            to_model_name=to_model,
+            device=device,
+        )
+        result = aug.augment(text)
+        result_text = result[0] if isinstance(result, list) else result
+        return retokenize(result_text) if result_text else tokens
     
     except Exception as e:
         print(f"Warning: Back-translation failed: {e}")
@@ -416,7 +451,8 @@ def keyboard_typo(tokens: List[str], aug_p: float = 0.1) -> List[str]:
             aug_word_p=0.3,
         )
         result = aug.augment(text)
-        return result[0].split() if isinstance(result, list) else result.split()
+        result_text = result[0] if isinstance(result, list) else result
+        return retokenize(result_text) or tokens
     
     except Exception as e:
         print(f"Warning: Keyboard augmentation failed: {e}")
@@ -444,7 +480,8 @@ def ocr_error(tokens: List[str], aug_p: float = 0.1) -> List[str]:
             aug_word_p=0.3,
         )
         result = aug.augment(text)
-        return result[0].split() if isinstance(result, list) else result.split()
+        result_text = result[0] if isinstance(result, list) else result
+        return retokenize(result_text) or tokens
     
     except Exception as e:
         print(f"Warning: OCR augmentation failed: {e}")
@@ -510,7 +547,7 @@ class TextAugmenter:
             device: Device for BERT ('cpu' or 'cuda')
             aug_p: Probability parameter for individual augmenters
             n_ops: Max number of operations per augmenter
-            stopwords: Set of stopwords to skip
+            stopwords: Set of words to skip (defaults to stopwords + sentiment words)
         """
         self.strategies = strategies or ["random_swap", "random_delete"]
         self.p = p
@@ -520,17 +557,15 @@ class TextAugmenter:
         self.device = device
         self.aug_p = aug_p
         self.n_ops = n_ops
-        self.stopwords = list(stopwords) if stopwords else list(get_romanian_stopwords())
+        # Use combined exclusion list (stopwords + sentiment words) to preserve sentiment
+        self.stopwords = list(stopwords) if stopwords else list(get_augmentation_exclusion_words())
         
         # Set global fasttext path
         global _FASTTEXT_MODEL_PATH
         if fasttext_path:
             _FASTTEXT_MODEL_PATH = fasttext_path
         
-        # Track if back_translation is requested (handled separately)
-        self.use_back_translation = "back_translation" in self.strategies
-        
-        # Build augmenters (excluding back_translation which is handled separately)
+        # Build augmenters
         self.augmenters = self._build_augmenters()
         self.flow = self._build_flow()
     
@@ -627,9 +662,12 @@ class TextAugmenter:
             )
         
         elif strategy == "back_translation":
-            # Use custom wrapper since Helsinki-NLP models are deprecated
-            # Return None here - we'll handle back_translation specially in __call__
-            return None
+            # Use Helsinki-NLP OPUS-MT models for Romanian back-translation
+            return naw.BackTranslationAug(
+                from_model_name="Helsinki-NLP/opus-mt-roa-en",
+                to_model_name="Helsinki-NLP/opus-mt-en-ro",
+                device=self.device,
+            )
         
         elif strategy == "keyboard":
             return nac.KeyboardAug(
@@ -680,23 +718,6 @@ class TextAugmenter:
         if not tokens:
             return tokens
         
-        # Handle back_translation separately (uses custom M2M100 implementation)
-        if self.use_back_translation:
-            if self.mode == "one_of" and not self.augmenters:
-                # Only back_translation was requested
-                return back_translate(tokens, device=self.device)
-            elif self.mode == "one_of":
-                # Randomly choose between back_translation and other augmenters
-                if random.random() < 1.0 / (len(self.augmenters) + 1):
-                    return back_translate(tokens, device=self.device)
-            elif self.mode == "sometimes":
-                # Apply back_translation with probability p
-                if random.random() < self.p:
-                    tokens = back_translate(tokens, device=self.device)
-            elif self.mode == "sequential":
-                # Apply back_translation in sequence
-                tokens = back_translate(tokens, device=self.device)
-        
         if not self.augmenters:
             return tokens
         
@@ -712,7 +733,8 @@ class TextAugmenter:
             else:
                 return tokens
             
-            result_tokens = result[0].split() if isinstance(result, list) else result.split()
+            result_text = result[0] if isinstance(result, list) else result
+            result_tokens = retokenize(result_text)
             return result_tokens if result_tokens else tokens
         except Exception as e:
             print(f"Warning: Augmentation failed: {e}")

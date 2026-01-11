@@ -191,10 +191,12 @@ def plot_most_frequent_words(
     """Plot most frequent words per sentiment class."""
     save_dir.mkdir(parents=True, exist_ok=True)
     
-    # Import tokenizer
+    # Import tokenizer - use proper spaCy tokenization for consistency
     try:
         from src.preprocessing.text import tokenize
     except ImportError:
+        import warnings
+        warnings.warn("Could not import tokenize from src.preprocessing.text, using simple split")
         tokenize = lambda x: str(x).lower().split()
     
     # Load train data
@@ -358,29 +360,56 @@ def plot_augmentation_comparison(
     """Compare same experiment with and without augmentation on the same plot.
     
     Expects naming convention:
-        - Base experiment: `expname`
+        - Base experiment: `expname_noaug`
         - With augmentation: `expname_aug_augtype`
     """
     save_dir.mkdir(parents=True, exist_ok=True)
     
     # Parse experiment names to find pairs
-    # Pattern: base experiments don't contain "_aug_", augmented ones do
+    # Pattern: base experiments contain "_noaug"
     base_experiments = {}
     aug_experiments = {}
-    
+
+    # 1. First pass: Identify all base experiments
     for name, data in results.items():
-        if "_aug_" in name:
-            # Extract base name and augmentation type
-            # e.g., "lstm_h256_l2_aug_eda" -> base="lstm_h256_l2", aug_type="eda"
-            parts = name.rsplit("_aug_", 1)
-            base_name = parts[0]
-            aug_type = parts[1] if len(parts) > 1 else "unknown"
+        if "_noaug" in name:
+            # Base experiment: base_name_noaug
+            base_name = name.split("_noaug")[0].rstrip("_")
+            base_experiments[base_name] = data
+
+    # 2. Second pass: Identify augmented experiments based on known base names
+    for name, data in results.items():
+        # Skip if it is a base experiment
+        if "_noaug" in name:
+            continue
             
-            if base_name not in aug_experiments:
-                aug_experiments[base_name] = []
-            aug_experiments[base_name].append((name, aug_type, data))
-        else:
-            base_experiments[name] = data
+        if "_p0." in name:
+            # Candidate structure: base_name_augtype_p0.x
+            # We try to match the start of the string with known base names
+            matched_base = None
+            # Find longest matching base name to avoid partial matches
+            # (e.g. valid match 'bilstm_attention_1layer' vs 'bilstm_attention')
+            sorted_base_names = sorted(base_experiments.keys(), key=len, reverse=True)
+            
+            for base_name in sorted_base_names:
+                # Check if this name starts with base_name + "_"
+                if name.startswith(base_name + "_"):
+                    matched_base = base_name
+                    break
+            
+            if matched_base:
+                # successfully identified base model
+                # name is like: {base_name}_{aug_type}_p0.x
+                # aug_part is: {aug_type}_p0.x
+                aug_part = name[len(matched_base)+1:]
+                
+                # split off the prob part
+                if "_p0." in aug_part:
+                    aug_type = aug_part.split("_p0.")[0]
+                    
+                    if matched_base not in aug_experiments:
+                        aug_experiments[matched_base] = []
+                    aug_experiments[matched_base].append((name, aug_type, data))
     
     # Find matching pairs
     pairs = []
@@ -543,10 +572,15 @@ def create_results_table(
     df.to_csv(save_path.with_suffix(".csv"), index=False)
     
     # Save formatted markdown table
-    with open(save_path.with_suffix(".md"), "w") as f:
-        f.write("# Experiment Results Summary\n\n")
-        f.write(df.to_markdown(index=False))
-        f.write("\n")
+    try:
+        with open(save_path.with_suffix(".md"), "w") as f:
+            f.write("# Experiment Results Summary\n\n")
+            f.write(df.to_markdown(index=False))
+            f.write("\n")
+    except ImportError:
+        print("⚠️  Could not generate markdown table (tabulate not installed/updated). Skipped.")
+    except Exception as e:
+        print(f"⚠️  Could not generate markdown table: {e}")
     
     if show:
         print("\n" + "="*80)
@@ -555,7 +589,7 @@ def create_results_table(
         print(df.to_string(index=False))
         print("="*80)
     
-    print(f"\n✓ Saved results table to {save_path.with_suffix('.csv')} and {save_path.with_suffix('.md')}")
+    print(f"\n✓ Saved results table to {save_path.with_suffix('.csv')}")
     
     return df
 

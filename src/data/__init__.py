@@ -23,6 +23,8 @@ from .augmentations import (
     TextAugmenter,
     # Utilities
     get_romanian_stopwords,
+    get_augmentation_exclusion_words,
+    retokenize,
 )
 
 __all__ = [
@@ -50,4 +52,6 @@ __all__ = [
     "TextAugmenter",
     # Utilities
     "get_romanian_stopwords",
+    "get_augmentation_exclusion_words",
+    "retokenize",
 ]

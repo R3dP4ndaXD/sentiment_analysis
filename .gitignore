@@ -42,8 +42,8 @@ fasttext/
 *.vec
 
 # Plots (regenerate from code)
-plots/
-visualizations/
+*plots/
+*visualizations/
 
 # Logs
 logs/

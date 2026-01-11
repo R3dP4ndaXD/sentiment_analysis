@@ -41,7 +41,7 @@ from src.data.dataloader import create_dataloaders, TextCsvDataset, collate_enco
 from src.data.augmentations import (
     random_swap, random_delete, contextual_insert,
     random_crop, synonym_replacement_fasttext, contextual_word_replacement, 
-    TextAugmenter, get_romanian_stopwords,
+    TextAugmenter,
     get_eda_augmenter, get_light_augmenter, get_semantic_augmenter, 
     get_heavy_augmenter, get_noise_augmenter,
     back_translate, keyboard_typo, ocr_error,
@@ -187,8 +187,9 @@ def get_augmentation_fn(aug_name: str, aug_prob: float, aug_mode: str = "sometim
     # Convert probability to discrete count for swap/insert (1-5 operations)
     n_ops = max(1, int(aug_prob * 5)) if aug_prob else 1
     
-    # Load Romanian stopwords
-    stopwords = get_romanian_stopwords()
+    # Load exclusion words (stopwords + sentiment-bearing words to preserve)
+    from src.data.augmentations import get_augmentation_exclusion_words
+    exclusion_words = get_augmentation_exclusion_words()
     
     # Single augmentation functions
     single_augs = {
@@ -197,10 +198,10 @@ def get_augmentation_fn(aug_name: str, aug_prob: float, aug_mode: str = "sometim
         "random_crop": lambda tokens: random_crop(tokens, min_ratio=0.7, max_ratio=0.9),
         "inser": lambda tokens: contextual_insert(tokens, n_inserts=n_ops, device=device),
         "synonym": lambda tokens: synonym_replacement_fasttext(
-            tokens, n_replacements=n_ops, model_path=fasttext_path, stopwords=stopwords
+            tokens, n_replacements=n_ops, model_path=fasttext_path, stopwords=exclusion_words
         ),
         "contextual_replace": lambda tokens: contextual_word_replacement(
-            tokens, n_replacements=n_ops, stopwords=stopwords, device=device
+            tokens, n_replacements=n_ops, stopwords=exclusion_words, device=device
         ),
         "back_translate": lambda tokens: back_translate(tokens, device=device),
         "keyboard": lambda tokens: keyboard_typo(tokens, aug_p=aug_prob),
@@ -221,7 +222,6 @@ def get_augmentation_fn(aug_name: str, aug_prob: float, aug_mode: str = "sometim
             device=device,
             aug_p=aug_prob,
             n_ops=n_ops,
-            stopwords=stopwords,
         )(tokens),
         "eda_plus": lambda tokens: TextAugmenter(
             strategies=["random_swap", "random_delete", "contextual_insert", "contextual_substitute", "synonym_wordnet"],
@@ -231,7 +231,6 @@ def get_augmentation_fn(aug_name: str, aug_prob: float, aug_mode: str = "sometim
             device=device,
             aug_p=aug_prob,
             n_ops=n_ops,
-            stopwords=stopwords,
         )(tokens),
         "semantic": lambda tokens: TextAugmenter(
             strategies=["synonym_fasttext", "contextual_insert", "contextual_substitute"],
@@ -241,7 +240,6 @@ def get_augmentation_fn(aug_name: str, aug_prob: float, aug_mode: str = "sometim
             device=device,
             aug_p=aug_prob,
             n_ops=n_ops,
-            stopwords=stopwords,
         )(tokens),
         # Light: structural only (swap + delete)
         "eda_light": lambda tokens: TextAugmenter(
