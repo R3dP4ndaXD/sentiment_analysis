@@ -1,0 +1,13 @@
+# Experiment Results Summary
+
+| Experiment                               | Model            |   Hidden |   Layers | Augment   |   Test Acc |   Test F1 |   Test Prec |   Test Rec |   Best Val Loss |   Best Val F1 |   Epochs |
+|:-----------------------------------------|:-----------------|---------:|---------:|:----------|-----------:|----------:|------------:|-----------:|----------------:|--------------:|---------:|
+| bilstm_attention_hd128_nl2_balanced      | bilstm_attention |      128 |        2 | none      |     0.8717 |    0.8904 |      0.855  |     0.9289 |          0.2583 |        0.9136 |       30 |
+| bilstm_attention_hd128_nl2_eda_plus_p0.1 | bilstm_attention |      128 |        2 | eda_plus  |     0.8693 |    0.8819 |      0.8952 |     0.8689 |          0.2629 |        0.9122 |       29 |
+| lstm_bi_hd128_nl2_balanced               | lstm             |      128 |        2 | none      |     0.8682 |    0.8782 |      0.9128 |     0.846  |          0.2661 |        0.9088 |       29 |
+| lstm_bi_hd128_nl2_eda_plus_p0.1          | lstm             |      128 |        2 | eda_plus  |     0.8683 |    0.878  |      0.9146 |     0.8443 |          0.2709 |        0.9129 |       29 |
+| lstm_bi_hd128_nl2_noaug                  | lstm             |      128 |        2 | none      |     0.863  |    0.8763 |      0.888  |     0.865  |          0.2888 |        0.9069 |       25 |
+| simple_rnn_bi_hd128_nl2_eda_plus_p0.1    | simple_rnn       |      128 |        2 | eda_plus  |     0.847  |    0.8646 |      0.8588 |     0.8705 |          0.3032 |        0.8951 |       30 |
+| simple_rnn_bi_hd128_nl2_balanced         | simple_rnn       |      128 |        2 | none      |     0.8418 |    0.8616 |      0.8465 |     0.8773 |          0.3085 |        0.8932 |       30 |
+| bilstm_attention_hd128_nl2_noaug         | bilstm_attention |      128 |        2 | none      |     0.8514 |    0.8582 |      0.9242 |     0.801  |          0.2653 |        0.9103 |       30 |
+| simple_rnn_bi_hd128_nl2_noaug            | simple_rnn       |      128 |        2 | none      |     0.8315 |    0.8447 |      0.8753 |     0.8161 |          0.3256 |        0.8906 |       18 |

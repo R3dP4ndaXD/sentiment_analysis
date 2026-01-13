@@ -1,0 +1,25 @@
+{
+  "dataset_size": {
+    "train": 15003,
+    "val": 2648,
+    "test": 11005
+  },
+  "class_balance_train": {
+    "negative_pct": 38.7,
+    "positive_pct": 61.3
+  },
+  "text_length_train": {
+    "mean_words": 77.71,
+    "median_words": 79.0,
+    "p95_words": 148,
+    "max_words": 373,
+    "mean_chars": 444.44
+  },
+  "vocabulary": {
+    "total_unique_words": 48364,
+    "words_freq_2plus": 26244
+  },
+  "recommendations": {
+    "max_seq_len": 160
+  }
+}
