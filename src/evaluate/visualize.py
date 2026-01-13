@@ -3,6 +3,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Union
 
 import matplotlib.pyplot as plt
+from matplotlib.ticker import MaxNLocator
 import numpy as np
 import seaborn as sns
 from sklearn.metrics import confusion_matrix
@@ -48,6 +49,7 @@ def plot_training_curves(
     ax.set_title(title)
     ax.legend(loc='upper right')
     ax.grid(True, alpha=0.3)
+    ax.xaxis.set_major_locator(MaxNLocator(integer=True))  # Force integer epochs
     
     # Mark best validation loss
     best_epoch = np.argmin(history["val_loss"]) + 1
@@ -116,6 +118,7 @@ def plot_metrics_curves(
         ax.set_title(f'{metric.upper()} over Training')
         ax.legend(loc='lower right')
         ax.grid(True, alpha=0.3)
+        ax.xaxis.set_major_locator(MaxNLocator(integer=True))  # Force integer epochs
         
         # Mark best validation metric
         if val_key in history and history[val_key]:
@@ -236,6 +239,7 @@ def plot_comparison(
     ax.set_title(title)
     ax.legend(loc='best')
     ax.grid(True, alpha=0.3)
+    ax.xaxis.set_major_locator(MaxNLocator(integer=True))  # Force integer epochs
     
     plt.tight_layout()
     
@@ -318,6 +322,7 @@ def plot_learning_rate(
     ax.set_title(title)
     ax.set_yscale('log')
     ax.grid(True, alpha=0.3)
+    ax.xaxis.set_major_locator(MaxNLocator(integer=True))  # Force integer epochs
     
     plt.tight_layout()
     

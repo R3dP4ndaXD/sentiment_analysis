@@ -35,6 +35,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 import matplotlib.pyplot as plt
+from matplotlib.ticker import MaxNLocator
 import numpy as np
 import pandas as pd
 import seaborn as sns
@@ -343,6 +344,7 @@ def plot_model_comparison(
     ax.set_title(title, fontsize=14, fontweight='bold')
     ax.legend(loc='best', fontsize=9)
     ax.grid(True, alpha=0.3)
+    ax.xaxis.set_major_locator(MaxNLocator(integer=True))  # Force integer epochs
     
     plt.tight_layout()
     plt.savefig(save_path, dpi=150, bbox_inches='tight')
@@ -359,22 +361,23 @@ def plot_augmentation_comparison(
 ):
     """Compare same experiment with and without augmentation on the same plot.
     
-    Expects naming convention:
-        - Base experiment: `expname_noaug`
-        - With augmentation: `expname_aug_augtype`
+    Expects naming conventions:
+        - Base experiment (no aug): `expname_noaug`
+        - Offline balanced augmentation: `expname_balanced`
+        - Offline expanded augmentation: `expname_expanded`
+        - Online augmentation: `expname_aug_augtype_p0.x`
     """
     save_dir.mkdir(parents=True, exist_ok=True)
     
     # Parse experiment names to find pairs
-    # Pattern: base experiments contain "_noaug"
-    base_experiments = {}
-    aug_experiments = {}
+    base_experiments = {}  # base_name -> data
+    aug_experiments = {}   # base_name -> [(full_name, aug_type, data), ...]
 
-    # 1. First pass: Identify all base experiments
+    # 1. First pass: Identify all base experiments (contain "_noaug")
     for name, data in results.items():
         if "_noaug" in name:
             # Base experiment: base_name_noaug
-            base_name = name.split("_noaug")[0].rstrip("_")
+            base_name = name.replace("_noaug", "")
             base_experiments[base_name] = data
 
     # 2. Second pass: Identify augmented experiments based on known base names
@@ -382,34 +385,37 @@ def plot_augmentation_comparison(
         # Skip if it is a base experiment
         if "_noaug" in name:
             continue
-            
-        if "_p0." in name:
-            # Candidate structure: base_name_augtype_p0.x
-            # We try to match the start of the string with known base names
-            matched_base = None
-            # Find longest matching base name to avoid partial matches
-            # (e.g. valid match 'bilstm_attention_1layer' vs 'bilstm_attention')
-            sorted_base_names = sorted(base_experiments.keys(), key=len, reverse=True)
-            
-            for base_name in sorted_base_names:
-                # Check if this name starts with base_name + "_"
-                if name.startswith(base_name + "_"):
-                    matched_base = base_name
-                    break
-            
-            if matched_base:
-                # successfully identified base model
-                # name is like: {base_name}_{aug_type}_p0.x
-                # aug_part is: {aug_type}_p0.x
-                aug_part = name[len(matched_base)+1:]
-                
-                # split off the prob part
-                if "_p0." in aug_part:
-                    aug_type = aug_part.split("_p0.")[0]
-                    
-                    if matched_base not in aug_experiments:
-                        aug_experiments[matched_base] = []
-                    aug_experiments[matched_base].append((name, aug_type, data))
+        
+        # Find longest matching base name to avoid partial matches
+        sorted_base_names = sorted(base_experiments.keys(), key=len, reverse=True)
+        matched_base = None
+        
+        for base_name in sorted_base_names:
+            # Check if this name starts with base_name + "_"
+            if name.startswith(base_name + "_"):
+                matched_base = base_name
+                break
+        
+        if not matched_base:
+            continue
+        
+        # Get the suffix after base name
+        suffix = name[len(matched_base)+1:]  # e.g., "balanced", "expanded", "random_swap_p0.3"
+        
+        # Determine augmentation type
+        aug_type = None
+        
+        # Check for offline augmentation patterns
+        if suffix in ("balanced", "expanded"):
+            aug_type = f"offline_{suffix}"
+        # Check for online augmentation pattern (_p0.x)
+        elif "_p0." in suffix:
+            aug_type = suffix.split("_p0.")[0]  # e.g., "random_swap"
+        
+        if aug_type:
+            if matched_base not in aug_experiments:
+                aug_experiments[matched_base] = []
+            aug_experiments[matched_base].append((name, aug_type, data))
     
     # Find matching pairs
     pairs = []
@@ -426,7 +432,10 @@ def plot_augmentation_comparison(
     
     if not pairs:
         print("⚠️  No matching experiment pairs found (base vs augmented)")
-        print("   Expected naming: 'expname' (base) and 'expname_aug_augtype' (augmented)")
+        print("   Expected naming patterns:")
+        print("     - Base: 'expname_noaug'")
+        print("     - Offline: 'expname_balanced' or 'expname_expanded'")
+        print("     - Online: 'expname_augtype_p0.x'")
         print(f"   Found base experiments: {list(base_experiments.keys())}")
         print(f"   Found aug experiments: {list(aug_experiments.keys())}")
         return
@@ -435,49 +444,70 @@ def plot_augmentation_comparison(
     for pair in pairs:
         print(f"  - {pair['base_name']} vs {pair['aug_name']} ({pair['aug_type']})")
     
-    # Plot each pair on the same plot
+    # Group pairs by base experiment for multi-augmentation comparison
+    pairs_by_base = {}
+    for pair in pairs:
+        base = pair["base_name"]
+        if base not in pairs_by_base:
+            pairs_by_base[base] = []
+        pairs_by_base[base].append(pair)
+    
+    # Plot each base experiment with ALL its augmentation variants
     for metric in ["val_loss", "val_f1", "val_acc"]:
         metric_label = metric.replace("_", " ").title()
         
-        # Determine grid size
-        n_pairs = len(pairs)
-        n_cols = min(2, n_pairs)
-        n_rows = (n_pairs + n_cols - 1) // n_cols
+        # Determine grid size based on number of base experiments
+        n_bases = len(pairs_by_base)
+        n_cols = min(2, n_bases)
+        n_rows = (n_bases + n_cols - 1) // n_cols
         
         fig, axes = plt.subplots(n_rows, n_cols, figsize=(7 * n_cols, 5 * n_rows), squeeze=False)
         axes = axes.flatten()
         
-        for idx, pair in enumerate(pairs):
+        # Color palette for different augmentation types
+        aug_colors = plt.cm.tab10(np.linspace(0, 1, 10))
+        
+        for idx, (base_name, base_pairs) in enumerate(pairs_by_base.items()):
             ax = axes[idx]
             
-            base_history = pair["base_data"].get("history", {})
-            aug_history = pair["aug_data"].get("history", {})
-            
-            # Plot base experiment
+            # Plot base experiment (no augmentation)
+            base_history = base_pairs[0]["base_data"].get("history", {})
             if metric in base_history:
                 epochs = range(1, len(base_history[metric]) + 1)
                 ax.plot(epochs, base_history[metric], 
-                       label="Without Augmentation", linewidth=2, color="#3498db", linestyle="-")
+                       label="No Augmentation", linewidth=2, color="black", linestyle="-")
             
-            # Plot augmented experiment
-            if metric in aug_history:
-                epochs = range(1, len(aug_history[metric]) + 1)
-                ax.plot(epochs, aug_history[metric],
-                       label=f"With {pair['aug_type']}", linewidth=2, color="#e74c3c", linestyle="--")
+            # Plot all augmented variants
+            for i, pair in enumerate(base_pairs):
+                aug_history = pair["aug_data"].get("history", {})
+                if metric in aug_history:
+                    epochs = range(1, len(aug_history[metric]) + 1)
+                    
+                    # Use different line styles for offline vs online
+                    if pair["aug_type"].startswith("offline_"):
+                        linestyle = "--"
+                        label = pair["aug_type"].replace("offline_", "").title()
+                    else:
+                        linestyle = "-."
+                        label = pair["aug_type"].replace("_", " ").title()
+                    
+                    ax.plot(epochs, aug_history[metric],
+                           label=label, linewidth=2, color=aug_colors[i % 10], linestyle=linestyle)
             
             ax.set_xlabel("Epoch")
             ax.set_ylabel(metric_label)
             
             # Create readable title from base name
-            title_name = pair["base_name"].replace("_", " ")
+            title_name = base_name.replace("_", " ")
             if len(title_name) > 30:
                 title_name = title_name[:27] + "..."
             ax.set_title(title_name, fontsize=11, fontweight='bold')
-            ax.legend(fontsize=9)
+            ax.legend(fontsize=8, loc='best')
             ax.grid(True, alpha=0.3)
+            ax.xaxis.set_major_locator(MaxNLocator(integer=True))  # Force integer epochs
         
         # Hide empty subplots
-        for idx in range(len(pairs), len(axes)):
+        for idx in range(len(pairs_by_base), len(axes)):
             axes[idx].set_visible(False)
         
         fig.suptitle(f"Augmentation Impact: {metric_label}", fontsize=14, fontweight='bold', y=1.02)
@@ -488,32 +518,45 @@ def plot_augmentation_comparison(
             plt.show()
         plt.close()
     
-    # Also create a summary plot with all pairs on one figure (for val_f1)
-    if len(pairs) > 1:
-        fig, ax = plt.subplots(figsize=(12, 6))
-        colors = plt.cm.tab10(np.linspace(0, 1, len(pairs)))
+    # Also create a summary plot with all experiments on one figure (for val_f1)
+    if len(pairs_by_base) > 0:
+        fig, ax = plt.subplots(figsize=(14, 7))
         
-        for pair, color in zip(pairs, colors):
-            base_history = pair["base_data"].get("history", {})
-            aug_history = pair["aug_data"].get("history", {})
+        line_idx = 0
+        colors = plt.cm.tab20(np.linspace(0, 1, 20))
+        
+        for base_name, base_pairs in pairs_by_base.items():
+            base_label = base_name.replace("_", " ")[:15]  # Short name
             
-            base_label = pair["base_name"].split("_")[0]  # Short name (model type)
-            
+            # Plot base (no aug)
+            base_history = base_pairs[0]["base_data"].get("history", {})
             if "val_f1" in base_history:
                 epochs = range(1, len(base_history["val_f1"]) + 1)
                 ax.plot(epochs, base_history["val_f1"], 
-                       label=f"{base_label} (no aug)", linewidth=2, color=color, linestyle="-")
+                       label=f"{base_label} (no aug)", linewidth=2, 
+                       color=colors[line_idx % 20], linestyle="-")
+                line_idx += 1
             
-            if "val_f1" in aug_history:
-                epochs = range(1, len(aug_history["val_f1"]) + 1)
-                ax.plot(epochs, aug_history["val_f1"],
-                       label=f"{base_label} ({pair['aug_type']})", linewidth=2, color=color, linestyle="--")
+            # Plot all augmented variants
+            for pair in base_pairs:
+                aug_history = pair["aug_data"].get("history", {})
+                if "val_f1" in aug_history:
+                    epochs = range(1, len(aug_history["val_f1"]) + 1)
+                    aug_label = pair["aug_type"].replace("offline_", "").replace("_", " ")
+                    
+                    linestyle = "--" if pair["aug_type"].startswith("offline_") else "-."
+                    
+                    ax.plot(epochs, aug_history["val_f1"],
+                           label=f"{base_label} ({aug_label})", linewidth=2, 
+                           color=colors[line_idx % 20], linestyle=linestyle)
+                    line_idx += 1
         
         ax.set_xlabel("Epoch", fontsize=12)
         ax.set_ylabel("Validation F1", fontsize=12)
-        ax.set_title("All Experiments: With vs Without Augmentation", fontsize=14, fontweight='bold')
-        ax.legend(loc='best', fontsize=9)
+        ax.set_title("All Experiments: Augmentation Comparison", fontsize=14, fontweight='bold')
+        ax.legend(loc='center left', bbox_to_anchor=(1, 0.5), fontsize=9)
         ax.grid(True, alpha=0.3)
+        ax.xaxis.set_major_locator(MaxNLocator(integer=True))  # Force integer epochs
         
         plt.tight_layout()
         plt.savefig(save_dir / "augmentation_comparison_all_val_f1.png", dpi=150, bbox_inches='tight')
@@ -599,67 +642,235 @@ def plot_final_metrics_comparison(
     save_dir: Path,
     show: bool = False,
 ):
-    """Bar chart comparing final test metrics across experiments."""
+    """Generate multiple comparison visualizations for final test metrics."""
     save_dir.mkdir(parents=True, exist_ok=True)
     
-    experiments = []
-    accuracies = []
-    f1_scores = []
-    precisions = []
-    recalls = []
-    
+    # Collect data
+    rows = []
     for name, data in results.items():
         metrics = data.get("metrics", {}).get("overall", {})
         if not metrics:
             continue
-        
-        experiments.append(name.split("_")[0])  # Short name
-        accuracies.append(metrics.get("accuracy", 0))
-        f1_scores.append(metrics.get("f1", 0))
-        precisions.append(metrics.get("precision", 0))
-        recalls.append(metrics.get("recall", 0))
+        rows.append({
+            "Experiment": name,
+            "Accuracy": metrics.get("accuracy", 0),
+            "F1": metrics.get("f1", 0),
+            "Precision": metrics.get("precision", 0),
+            "Recall": metrics.get("recall", 0),
+        })
     
-    if not experiments:
+    if not rows:
         print("⚠️  No experiments with test metrics found")
         return
     
-    x = np.arange(len(experiments))
-    width = 0.2
+    df = pd.DataFrame(rows)
     
-    fig, ax = plt.subplots(figsize=(max(12, len(experiments) * 2), 6))
+    # ==========================================================================
+    # 1. Sorted horizontal bar charts - one per metric (most useful!)
+    # ==========================================================================
+    for metric in ["F1", "Accuracy", "Precision", "Recall"]:
+        fig, ax = plt.subplots(figsize=(12, max(6, len(df) * 0.4)))
+        
+        # Sort by metric value
+        df_sorted = df.sort_values(metric, ascending=True)
+        
+        # Color gradient based on value
+        colors = plt.cm.RdYlGn(df_sorted[metric])
+        
+        y_pos = np.arange(len(df_sorted))
+        bars = ax.barh(y_pos, df_sorted[metric], color=colors, edgecolor='black', linewidth=0.5)
+        
+        ax.set_yticks(y_pos)
+        ax.set_yticklabels(df_sorted["Experiment"], fontsize=9)
+        ax.set_xlabel(metric, fontsize=12)
+        ax.set_title(f"Test {metric} Comparison (sorted)", fontsize=14, fontweight='bold')
+        ax.set_xlim(0, 1.05)
+        ax.grid(True, alpha=0.3, axis='x')
+        
+        # Add value labels
+        for bar, val in zip(bars, df_sorted[metric]):
+            ax.text(val + 0.01, bar.get_y() + bar.get_height()/2, 
+                   f'{val:.4f}', va='center', fontsize=9)
+        
+        # Add vertical line at mean
+        mean_val = df_sorted[metric].mean()
+        ax.axvline(mean_val, color='red', linestyle='--', linewidth=2, alpha=0.7)
+        ax.text(mean_val + 0.01, len(df_sorted) - 0.5, f'Mean: {mean_val:.4f}', 
+               color='red', fontsize=10, fontweight='bold')
+        
+        plt.tight_layout()
+        plt.savefig(save_dir / f"comparison_{metric.lower()}_sorted.png", dpi=150, bbox_inches='tight')
+        if show:
+            plt.show()
+        plt.close()
     
-    bars1 = ax.bar(x - 1.5*width, accuracies, width, label='Accuracy', color='#3498db')
-    bars2 = ax.bar(x - 0.5*width, f1_scores, width, label='F1 Score', color='#2ecc71')
-    bars3 = ax.bar(x + 0.5*width, precisions, width, label='Precision', color='#e74c3c')
-    bars4 = ax.bar(x + 1.5*width, recalls, width, label='Recall', color='#9b59b6')
+    # ==========================================================================
+    # 2. Heatmap - experiments vs metrics
+    # ==========================================================================
+    fig, ax = plt.subplots(figsize=(8, max(8, len(df) * 0.35)))
     
-    ax.set_xlabel('Model')
-    ax.set_ylabel('Score')
-    ax.set_title('Test Metrics Comparison Across Models', fontsize=14, fontweight='bold')
-    ax.set_xticks(x)
-    ax.set_xticklabels(experiments, rotation=45, ha='right')
-    ax.legend(loc='lower right')
-    ax.set_ylim(0, 1.1)
-    ax.grid(True, alpha=0.3, axis='y')
+    # Sort by F1 for consistent ordering
+    df_sorted = df.sort_values("F1", ascending=False)
     
-    # Add value labels on bars
-    for bars in [bars1, bars2, bars3, bars4]:
-        for bar in bars:
-            height = bar.get_height()
-            ax.annotate(f'{height:.3f}',
-                       xy=(bar.get_x() + bar.get_width()/2, height),
-                       xytext=(0, 3),
-                       textcoords="offset points",
-                       ha='center', va='bottom', fontsize=8, rotation=90)
+    heatmap_data = df_sorted[["Accuracy", "F1", "Precision", "Recall"]].values
+    
+    sns.heatmap(
+        heatmap_data,
+        annot=True,
+        fmt='.4f',
+        cmap='RdYlGn',
+        vmin=0.5,
+        vmax=1.0,
+        xticklabels=["Accuracy", "F1", "Precision", "Recall"],
+        yticklabels=df_sorted["Experiment"],
+        ax=ax,
+        cbar_kws={'label': 'Score'},
+        linewidths=0.5,
+    )
+    
+    ax.set_title("Test Metrics Heatmap (sorted by F1)", fontsize=14, fontweight='bold')
+    ax.set_xlabel("")
+    ax.set_ylabel("")
     
     plt.tight_layout()
-    plt.savefig(save_dir / "metrics_comparison_bar.png", dpi=150, bbox_inches='tight')
-    
+    plt.savefig(save_dir / "comparison_heatmap.png", dpi=150, bbox_inches='tight')
     if show:
         plt.show()
     plt.close()
     
-    print(f"✓ Saved metrics comparison bar chart to {save_dir / 'metrics_comparison_bar.png'}")
+    # ==========================================================================
+    # 3. Augmentation effect comparison (grouped by base model)
+    # ==========================================================================
+    # Parse experiment names to group by base model
+    groups = {}
+    for _, row in df.iterrows():
+        name = row["Experiment"]
+        
+        # Determine base name and augmentation type
+        if "_noaug" in name:
+            base = name.replace("_noaug", "")
+            aug_type = "No Aug"
+        elif "_balanced" in name:
+            base = name.replace("_balanced", "")
+            aug_type = "Balanced"
+        elif "_expanded" in name:
+            base = name.replace("_expanded", "")
+            aug_type = "Expanded"
+        elif "_p0." in name:
+            # Online augmentation: base_augtype_p0.x
+            parts = name.rsplit("_p0.", 1)
+            prefix = parts[0]
+            # Find the augmentation type - check from longest to shortest to avoid partial matches
+            known_augs = [
+                "eda_plus", "eda",  # EDA variants (check eda_plus before eda)
+                "random_swap", "random_delete", "random_insert", 
+                "synonym", "back_translate", "contextual",
+                "bert_insert", "bert_substitute",  # BERT-based
+            ]
+            for aug in known_augs:
+                if f"_{aug}" in prefix:
+                    base = prefix.replace(f"_{aug}", "")
+                    aug_type = aug.replace("_", " ").title()
+                    break
+            else:
+                # Unknown augmentation type - try to extract it anyway
+                # Pattern: base_AUGTYPE_p0.x -> extract AUGTYPE
+                parts_underscore = prefix.rsplit("_", 1)
+                if len(parts_underscore) == 2:
+                    base = parts_underscore[0]
+                    aug_type = parts_underscore[1].replace("_", " ").title()
+                else:
+                    continue
+        else:
+            continue
+        
+        if base not in groups:
+            groups[base] = {}
+        groups[base][aug_type] = row["F1"]
+    
+    if groups:
+        fig, ax = plt.subplots(figsize=(12, max(6, len(groups) * 1.2)))
+        
+        # Prepare data for grouped bar chart
+        base_models = list(groups.keys())
+        aug_types = sorted(set(aug for g in groups.values() for aug in g.keys()))
+        
+        x = np.arange(len(base_models))
+        width = 0.8 / len(aug_types)
+        
+        colors = plt.cm.tab10(np.linspace(0, 1, len(aug_types)))
+        
+        for i, aug_type in enumerate(aug_types):
+            values = [groups[base].get(aug_type, 0) for base in base_models]
+            offset = (i - len(aug_types)/2 + 0.5) * width
+            bars = ax.bar(x + offset, values, width, label=aug_type, color=colors[i], edgecolor='black', linewidth=0.5)
+            
+            # Add value labels
+            for bar, val in zip(bars, values):
+                if val > 0:
+                    ax.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.005,
+                           f'{val:.3f}', ha='center', va='bottom', fontsize=8, rotation=90)
+        
+        ax.set_xlabel('Base Model', fontsize=12)
+        ax.set_ylabel('Test F1 Score', fontsize=12)
+        ax.set_title('Augmentation Effect on F1 Score by Model', fontsize=14, fontweight='bold')
+        ax.set_xticks(x)
+        ax.set_xticklabels([b.replace("_", " ") for b in base_models], rotation=45, ha='right', fontsize=10)
+        ax.legend(title="Augmentation", loc='upper left', bbox_to_anchor=(1.02, 1), fontsize=9)
+        ax.set_ylim(0, 1.15)  # Extra space for rotated labels
+        ax.grid(True, alpha=0.3, axis='y')
+        
+        plt.tight_layout()
+        plt.savefig(save_dir / "comparison_augmentation_effect.png", dpi=150, bbox_inches='tight')
+        if show:
+            plt.show()
+        plt.close()
+    
+    # ==========================================================================
+    # 4. Top N models comparison (radar/spider chart for top 5)
+    # ==========================================================================
+    top_n = min(5, len(df))
+    df_top = df.nlargest(top_n, "F1")
+    
+    metrics = ["Accuracy", "F1", "Precision", "Recall"]
+    num_vars = len(metrics)
+    
+    # Compute angle for each metric
+    angles = np.linspace(0, 2 * np.pi, num_vars, endpoint=False).tolist()
+    angles += angles[:1]  # Complete the loop
+    
+    fig, ax = plt.subplots(figsize=(10, 10), subplot_kw=dict(polar=True))
+    
+    colors = plt.cm.tab10(np.linspace(0, 1, top_n))
+    
+    for idx, (_, row) in enumerate(df_top.iterrows()):
+        values = [row[m] for m in metrics]
+        values += values[:1]  # Complete the loop
+        
+        label = row["Experiment"]
+        if len(label) > 25:
+            label = label[:22] + "..."
+        
+        ax.plot(angles, values, 'o-', linewidth=2, label=label, color=colors[idx])
+        ax.fill(angles, values, alpha=0.1, color=colors[idx])
+    
+    ax.set_xticks(angles[:-1])
+    ax.set_xticklabels(metrics, fontsize=12)
+    ax.set_ylim(0.5, 1.0)
+    ax.set_title(f"Top {top_n} Models Comparison (by F1)", fontsize=14, fontweight='bold', y=1.08)
+    ax.legend(loc='upper right', bbox_to_anchor=(1.3, 1.0), fontsize=9)
+    
+    plt.tight_layout()
+    plt.savefig(save_dir / "comparison_top_models_radar.png", dpi=150, bbox_inches='tight')
+    if show:
+        plt.show()
+    plt.close()
+    
+    print(f"✓ Saved comparison plots:")
+    print(f"   - comparison_<metric>_sorted.png (4 files)")
+    print(f"   - comparison_heatmap.png")
+    print(f"   - comparison_augmentation_effect.png")
+    print(f"   - comparison_top_models_radar.png")
 
 
 def generate_comparison_visualizations(
