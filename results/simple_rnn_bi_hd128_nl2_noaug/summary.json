@@ -1,0 +1,40 @@
+{
+  "model": "simple_rnn",
+  "best_val_f1": 0.890625,
+  "best_val_acc": 0.8651812688821753,
+  "best_val_loss": 0.3255758217094168,
+  "epochs_trained": 18,
+  "final_test_metrics": {
+    "overall": {
+      "accuracy": 0.831531122217174,
+      "precision": 0.8753255773571801,
+      "recall": 0.8160919540229885,
+      "f1": 0.844671581769437
+    },
+    "per_class": {
+      "Negative": {
+        "precision": 0.7834540602363705,
+        "recall": 0.8512841756420878,
+        "f1": 0.8159618820726623,
+        "support": 4828.0
+      },
+      "Positive": {
+        "precision": 0.8753255773571801,
+        "recall": 0.8160919540229885,
+        "f1": 0.844671581769437,
+        "support": 6177.0
+      }
+    },
+    "confusion_matrix": [
+      [
+        4110,
+        718
+      ],
+      [
+        1136,
+        5041
+      ]
+    ],
+    "classification_report": "              precision    recall  f1-score   support\n\n    Negative       0.78      0.85      0.82      4828\n    Positive       0.88      0.82      0.84      6177\n\n    accuracy                           0.83     11005\n   macro avg       0.83      0.83      0.83     11005\nweighted avg       0.84      0.83      0.83     11005\n"
+  }
+}
