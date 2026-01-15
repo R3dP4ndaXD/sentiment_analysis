@@ -31,19 +31,20 @@ Thumbs.db
 # Data files (large, download separately)
 data/raw/
 *.csv
+!plots/*/*.csv
 *.tsv
 
 # Model checkpoints and embeddings (large files)
-checkpoints/
-*.pt
-*.pth
-*.bin
+# checkpoints/
+# *.pt
+# *.pth
+# *.bin
 fasttext/
 *.vec
 
 # Plots (regenerate from code)
-*plots/
-*visualizations/
+# *plots/
+# *visualizations/
 
 # Logs
 logs/
